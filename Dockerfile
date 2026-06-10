@@ -1,18 +1,19 @@
-# syntax=docker/dockerfile:1
+FROM python:3.11-slim
 
-ARG PYTHON_VERSION=3.12.13
+WORKDIR /app
 
-FROM python:${PYTHON_VERSION}-slim
+# התקנת הספריות הבסיסיות (כמו flask ו-openai)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-LABEL fly_launch_runtime="flask"
+# העתקת קבצי האפליקציה, תיקיית התבניות ותיקיית המידע של ה-Terminal
+COPY app.py .
+COPY templates/ ./templates/
+COPY data/ ./data/
 
-WORKDIR /code
-
-COPY requirements.txt requirements.txt
-RUN pip3 install -r requirements.txt
-
-COPY . .
-
+# הגדרת הפורט הנדרש על ידי Fly.io
+ENV PORT=8080
 EXPOSE 8080
 
-CMD [ "python3", "-m" , "flask", "run", "--host=0.0.0.0", "--port=8080"]
+# הרצה ישירה של השרת שכתבנו
+CMD ["python", "app.py"]
