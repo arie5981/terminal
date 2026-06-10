@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>צ'אט תמיכה למייצגים</title>
     <style>
-        /* הגדרות כלליות למסך מלא */
+        /* 1. הגדרות תשתית ומסך מלא - רקע לבן */
         * {
             box-sizing: border-box;
             margin: 0;
@@ -14,15 +14,15 @@
         body, html {
             height: 100%;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f0f2f5;
+            background-color: #ffffff; /* רקע אתר לבן */
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
 
-        /* סרגל עליון - רקע כחול, טקסט לבן */
+        /* 2. סרגל עליון - כחול ממלכתי עם טקסט לבן */
         .header {
-            background-color: #1e3a8a; /* כחול כהה ממלכתי */
+            background-color: #1e3a8a; 
             height: 60px;
             display: flex;
             align-items: center;
@@ -47,7 +47,7 @@
             object-fit: contain;
         }
 
-        /* אזור השיחה המרכזי */
+        /* 3. אזור השיחה המרכזי - לבן */
         .chat-container {
             flex: 1;
             overflow-y: auto;
@@ -55,30 +55,29 @@
             display: flex;
             flex-direction: column;
             gap: 15px;
+            background-color: #ffffff;
         }
 
-        /* הודעת פתיחה מודגשת במרכז הדף - רקע כחול, טקסט לבן */
+        /* 4. הודעת פתיחה - רקע לבן, פונט תכלת, ממורכז ב-2 שורות (ללא מסגרת צבעונית) */
         .welcome-container {
-            background-color: #1e3a8a;
-            color: #ffffff;
-            font-weight: bold;
-            font-size: 18px;
+            background-color: #ffffff; 
+            color: #33b5e5; 
+            font-weight: normal; 
+            font-size: 20px;
             text-align: center;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 25px;
             max-width: 700px;
-            margin: 10px auto 20px auto;
+            margin: 20px auto;
             width: 90%;
             line-height: 1.6;
         }
 
-        /* בועות הודעה רגילות של המשך הצ'אט */
+        /* 5. מבנה בועות הצ'אט */
         .message-wrapper {
             display: flex;
             width: 100%;
             max-width: 700px;
-            margin: 0 auto; /* שומר שגם בועות הצ'אט יהיו במרכז רוחב המסך הסטנדרטי */
+            margin: 0 auto;
         }
         .message {
             max-width: 85%;
@@ -88,22 +87,23 @@
             line-height: 1.5;
             word-wrap: break-word;
         }
+        /* בועת הבוט קיבלה מסגרת אפורה עדינה מאוד כי הרקע לבן */
         .bot-message {
             background-color: #ffffff;
             color: #333333;
+            border: 1px solid #e4e6eb;
             border-top-right-radius: 2px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
         .user-message {
             background-color: #007bff;
             color: #ffffff;
             border-top-left-radius: 2px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
         .align-user { justify-content: flex-end; }
         .align-bot { justify-content: flex-start; }
 
-        /* סרגל תחתון להזנת שאלה - ממורכז ומעוצב כמו קפסולה */
+        /* 6. סרגל תחתון להזנת שאלה - רקע לבן נקי */
         .input-wrapper {
             background-color: #ffffff;
             border-top: 1px solid #e4e6eb;
@@ -115,28 +115,30 @@
         
         .input-container {
             width: 100%;
-            max-width: 700px; /* התיבה לא תתפוס את כל המסך, אלא תוגבל לגודל נוח */
+            max-width: 700px; 
             display: flex;
             align-items: flex-end;
             gap: 12px;
-            background-color: #f0f2f5;
-            padding: 8px 12px;
+            background-color: #ffffff; /* תיבת טקסט לבנה לחלוטין */
+            padding: 10px 15px;
             border-radius: 16px;
-            border: 1px solid #ccd0d5;
+            border: 1px solid #ccd0d5; /* מסגרת עדינה סביב אזור הכתיבה */
+            box-shadow: 0 1px 4px rgba(0,0,0,0.05);
         }
         
-        /* תיבת טקסט מרובת שורות - מתחילה מגובה של 3 שורות */
+        /* תיבת הטקסט עצמה */
         .chat-textarea {
             flex: 1;
             border: none;
             font-size: 16px;
             resize: none;
-            height: 70px; /* גובה התחלתי שמתאים לכ-3 שורות */
+            height: 75px; 
             max-height: 150px;
             font-family: inherit;
             outline: none;
             background: transparent;
-            line-height: 1.4;
+            line-height: 1.5;
+            color: #333333;
         }
 
         .send-button {
@@ -153,21 +155,20 @@
             font-size: 18px;
             transition: background-color 0.2s;
             flex-shrink: 0;
-            margin-bottom: 2px;
+            margin-bottom: 4px;
         }
         .send-button:hover {
             background-color: #0056b3;
         }
 
-        /* התאמות למסכים קטנים (ניידים) */
+        /* התאמות לניידים */
         @media (max-width: 600px) {
             .header-title { font-size: 16px; }
             .logo { height: 35px; }
             .chat-container { padding: 12px; }
-            .message { max-width: 90%; font-size: 15px; }
-            .welcome-container { font-size: 16px; padding: 15px; }
+            .welcome-container { font-size: 17px; padding: 15px; width: 95%; }
             .input-wrapper { padding: 10px; }
-            .chat-textarea { height: 60px; } /* מעט יותר קטן בנייד */
+            .chat-textarea { height: 65px; }
         }
     </style>
 </head>
@@ -175,7 +176,7 @@
 
     <div class="header">
         <div class="header-right">
-            <img src="{{ url_for('static', filename='logobtl.png') }}" alt="לוגו ביטוח לאומי" class="logo" onerror="console.log('Logo build path issue')">
+            <img src="{{ url_for('static', filename='logobtl.png') }}" alt="לוגו ביטוח לאומי" class="logo" onerror="this.src='https://upload.wikimedia.org/wikipedia/he/thumb/f/f3/Bituach_Leumi_logo.svg/1200px-Bituach_Leumi_logo.svg.png';">
             <span class="header-title">צ'אט תמיכה למייצגים</span>
         </div>
     </div>
@@ -183,7 +184,8 @@
     <div class="chat-container" id="chatContainer">
         
         <div class="welcome-container">
-            ברוכים הבאים לעוזרת הדיגיטלית של אתר מייצגים בגביה. כיצד אוכל לסייע לך היום?
+            ברוכים הבאים לעוזרת הדיגיטלית של אתר מייצגים בגביה.<br>
+            כיצד אוכל לסייע לך היום?
         </div>
 
     </div>
@@ -196,10 +198,9 @@
     </div>
 
     <script>
-        // פונקציה שמאפשרת לתיבה לגדול עוד יותר אם המשתמש כותב מגילה ארוכה
         function autoGrow(element) {
-            element.style.height = "70px"; // גובה הבסיס (3 שורות)
-            if (element.scrollHeight > 70) {
+            element.style.height = "75px";
+            if (element.scrollHeight > 75) {
                 element.style.height = (element.scrollHeight) + "px";
             }
         }
@@ -211,7 +212,7 @@
             
             if (text === '') return;
 
-            // הוספת הודעת המשתמש (ממורכזת לימין בתוך הטווח)
+            // הודעת משתמש
             const wrapperUser = document.createElement('div');
             wrapperUser.className = 'message-wrapper align-user';
             const userDiv = document.createElement('div');
@@ -220,25 +221,23 @@
             wrapperUser.appendChild(userDiv);
             chatContainer.appendChild(wrapperUser);
 
-            // איפוס התיבה לגובה המקורי של 3 השורות
             inputElement.value = '';
-            inputElement.style.height = "70px";
+            inputElement.style.height = "75px";
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
-            // סימולציית בוט זמנית (ממורכזת לשמאל בתוך הטווח)
+            // תגובה זמנית
             setTimeout(() => {
                 const wrapperBot = document.createElement('div');
                 wrapperBot.className = 'message-wrapper align-bot';
                 const botDiv = document.createElement('div');
                 botDiv.className = 'message bot-message';
-                botDiv.textContent = "קיבלתי את השאלה שלך. הממשק נראה מעולה וממורכז! בשלב הבא נחבר את הלוגיקה האמיתית לקריאת קובץ הנהלים.";
+                botDiv.textContent = "אני מעבד את השאלה שלך כרגע מתוך קובץ הנהלים של הטרמינל...";
                 wrapperBot.appendChild(botDiv);
                 chatContainer.appendChild(wrapperBot);
                 chatContainer.scrollTop = chatContainer.scrollHeight;
-            }, 1000);
+            }, 800);
         }
 
-        // מאפשר שליחה בלחיצת Enter (ו-Shift+Enter יורד שורה כרגיל)
         document.getElementById('userInput').addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
