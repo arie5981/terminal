@@ -6,3 +6,4 @@ faiss-cpu
 openai
 tiktoken
 rapidfuzz
+markdown
