@@ -4,6 +4,7 @@ import re
 import numpy as np
 from openai import OpenAI
 from rapidfuzz import fuzz
+import markdown  # ספרייה להמרת Markdown ל-HTML תקני ויפה
 
 app = Flask(__name__)
 
@@ -34,10 +35,7 @@ def load_and_parse_terminal_data():
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # נירמול ירידות שורה
     content = content.replace('\r\n', '\n').replace('\r', '\n')
-
-    # חיתוך לפי כותרות פרקים
     parts = re.split(r'===(פרק \d+)===', content)
     
     chapter_1_text = ""
@@ -59,7 +57,7 @@ def load_and_parse_terminal_data():
     link_matches = re.findall(r'>>([^:]+):\s*([^\s<<]+)<<', chapter_1_text)
     for name, url in link_matches:
         LINKS_DICTIONARY[name.strip()] = url.strip()
-    print(f"Loaded {len(LINKS_DICTIONARY)} global links from Chapter 1.")
+    print(f"Loaded {len(LINKS_DICTIONARY)} global links.")
 
     # --- 2. עיבוד פרק 2: שאלות ותשובות נפוצות ---
     qna_blocks = re.split(r'(?=שאלה:)', chapter_2_text)
@@ -99,13 +97,10 @@ def get_embedding(text):
     return response.data[0].embedding
 
 def inject_hyperlinks(text):
-    """
-    השתלת קישורים חכמה: תומכת בקישורי אינטרנט רגילים ובקישורי אימייל (mailto)
-    """
+    """השתלת קישורים חכמה - פועלת על ה-HTML הסופי"""
     for name, url in LINKS_DICTIONARY.items():
         placeholder = f"[{name}]"
         if placeholder in text:
-            # בודק אם הכתובת היא אימייל (מכילה @ ולא מתחילה ב-http)
             if "@" in url and not url.startswith("http"):
                 href_target = f"mailto:{url}"
             else:
@@ -141,27 +136,27 @@ def chat():
 
     combined_scores = (semantic_scores * 0.7) + (np.array(fuzzy_scores) * 0.3)
     
-    top_indices = np.argsort(combined_scores)[-3:][::-1]
+    # שינוי קריטי: שולפים את 6 המנות המובילות (במקום 3) כדי לקבל הקשר רחב ומלא יותר
+    top_indices = np.argsort(combined_scores)[-6:][::-1]
     retrieved_chunks = [CHUNKS_TEXTS[idx] for idx in top_indices]
     context = "\n\n---\n\n".join(retrieved_chunks)
 
-    # עדכון ה-System Prompt לניסוח שירותי חופשי, שמירה על מבנה ועימוד
+    # שיפור מקיף של ה-System Prompt לעיצוב, הדגשות, סדר ורמת ניסוח של Gemini
     messages = [
         {
             "role": "system", 
             "content": (
-                "אתה עוזר דיגיטלי מקצועי, שירותי וידידותי של אתר מייצגים בגביה של הביטוח הלאומי.\n"
-                "תפקידך לענות לנציגים ומייצגים בצורה ברורה, נעימה ומסודרת.\n\n"
-                "הנחיות קשיחות לגבי עימוד ומבנה התשובה (קריטי לקריאות):\n"
-                "1. חובה להפריד שלבים, סעיפים או הנחיות לשורות נפרדות לחלוטין! אל תכתוב אותם ברצף כפסקה אחת.\n"
-                "2. בכל פעם שיש רשימה, השתמש בירידת שורה מלאה והתחל כל סעיף בשורה חדשה (לדוגמה:\n"
-                "1. שלב ראשון...\n"
-                "2. שלב שני...)\n\n"
-                "הנחיות לגבי תוכן וניסוח (מענה חכם):\n"
+                "אתה עוזר דיגיטלי מקצועי, שירותי וידידותי ביותר של אתר מייצגים בגביה של הביטוח הלאומי.\n"
+                "תפקידך לספק תשובות מלאות, עשירות, מקיפות ונעימות מאוד לעין, בדיוק ברמה של צ'אטבוט מתקדמים.\n\n"
+                "הנחיות עיצוב ומבנה (Markdown תקני):\n"
+                "1. השתמש בהדגשות (כוכביות כפולות, למשל **טקסט מודגש**) עבור כותרות משנה, שלבים קריטיים, או שמות של תפריטים ומסלולים במערכת.\n"
+                "2. חלק את התשובה לפסקאות קטנות וברורות. השתמש ברשימות ממוספרות (1, 2, 3) או בנקודות (בוליטים) בצורה מרווחת ומסודרת.\n"
+                "3. התחל את התשובה בפתיח קצר ונעים (למשל: 'על פי נהלי התמיכה וההנחיות, הנה הדרכים לביצוע...'), וסיים בסיום שירותי.\n\n"
+                "הנחיות תוכן וניסוח:\n"
                 "1. הבס את תשובתך אך ורק על העובדות והנהלים המופיעים תחת 'מידע מהנהלים' המצורף מטה.\n"
-                "2. אל תעתיק את המידע בצורה עיוורת מילה במילה! נסח אותו מחדש בצורה שירותית, זורמת וקלה להבנה, תוך שמירה קפדנית על הדיוק המקצועי.\n"
-                "3. אם בתוך המידע מהנהלים מופיע ביטוי בסוגריים מרובעים (למשל [אתר מייצגים בגביה] או כתובת אימייל כמו [b_meyazgim@nioi.gov.il]), עליך להקפיד לכתוב אותו בתשובתך בדיוק באותו אופן עם הסוגריים המרובעים, כדי שמערכת הקישורים תוכל להחליף אותו בלינק פעיל.\n"
-                "4. אם המידע לא קיים בהקשר, אמור בנימוס שאין לך הנחיה מפורשת בנושא בנהלי הטרמינל."
+                "2. חבר את המידע בצורה חכמה! אם השאלה נוגעת לחובות, ומופיע מידע על מספר שיטות (למשל: גם הרשאה לחיוב, גם הסדר בפריסה וגם הפקת שוברים), הצג את כל האפשרויות הללו למשתמש בצורה מאורגנת ומסווגת.\n"
+                "3. נסח את הדברים בצורה שירותית, זורמת וחופשית - אל תעתיק משפטים יבשים מהקובץ מילה במילה, אלא תן חוויית מענה אנושית ואינטליגנטית.\n"
+                "4. אם מופיע ביטוי בסוגריים מרובעים (כמו [אתר מייצגים בגביה] או כתובת אימייל), שמור על הסוגריים המרובעים בדיוק כפי שהם בתשובתך."
             )
         }
     ]
@@ -178,14 +173,15 @@ def chat():
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
-            temperature=0.4 # העלאת הטמפרטורה במעט (מ-0.2 ל-0.4) מאפשרת למודל גמישות רבה יותר בניסוח מחדש
+            temperature=0.5  # טמפרטורה מאוזנת לניסוח עשיר וזורם
         )
         raw_answer = response.choices[0].message.content
         
-        # המרת ירידות שורה לתגיות HTML המוצגות כהלכה בדפדפן
-        formatted_answer = raw_answer.replace('\n', '<br>')
+        # המרה תקנית ומקצועית של Markdown ל-HTML (מטפל בהדגשות, רשימות ומבנה שורות)
+        html_answer = markdown.markdown(raw_answer, extensions=['nl2br'])
         
-        final_answer = inject_hyperlinks(formatted_answer)
+        # השתלת הקישורים על גבי ה-HTML הסופי
+        final_answer = inject_hyperlinks(html_answer)
         return jsonify({"response": final_answer})
 
     except Exception as e:
