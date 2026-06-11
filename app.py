@@ -1,11 +1,8 @@
 from flask import Flask, render_template, request, jsonify
 import os
-from openai import OpenAI
+import re
 
 app = Flask(__name__)
-
-# שליפת המפתח הסודי
-openai_api_key = os.environ.get("OPENAI_API_KEY")
 
 @app.route('/')
 def home():
@@ -13,35 +10,53 @@ def home():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    # בדיקה מקדימה אם המפתח בכלל קיים בשרת
-    if not openai_api_key:
+    file_path = os.path.join(os.path.dirname(__file__), 'data', 'Terminal.txt')
+    
+    # 1. בדיקה האם הקובץ פיזית קיים בנתיב
+    if not os.path.exists(file_path):
         return jsonify({
-            "response": "❌ שגיאה: המשתנה OPENAI_API_KEY לא מוגדר בכלל בשרת של Fly.io! ודא שהגדרת אותו בלשונית Secrets בדשבורד."
+            "response": f"❌ בדיקה נכשלה: הקובץ לא נמצא בנתיב המצופה: {file_path}. ודא ששם התיקייה הוא data ושם הקובץ הוא Terminal.txt"
         })
 
     try:
-        # אתחול הקליינט עם המפתח
-        client = OpenAI(api_key=openai_api_key)
+        # 2. ניסיון קריאת הקובץ
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
         
-        # פנייה קצרצרה לבדיקה
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "תענה במילה אחת בלבד: האם הכל עובד?"}
-            ],
-            temperature=0.2
-        )
+        file_size = len(content)
         
-        answer_from_ai = response.choices[0].message.content
+        # 3. ניסיון פירוק ראשוני לפרקים
+        chapters = re.split(r'(?=^פרק \d+)', content, flags=re.MULTILINE)
+        
+        chapter_1_len = 0
+        chapter_2_len = 0
+        chapter_3_len = 0
+        
+        for ch in chapters:
+            ch_clean = ch.strip()
+            if ch_clean.startswith("פרק 1"):
+                chapter_1_len = len(ch_clean)
+            elif ch_clean.startswith("פרק 2"):
+                chapter_2_len = len(ch_clean)
+            elif ch_clean.startswith("פרק 3"):
+                chapter_3_len = len(ch_clean)
+
+        # 4. החזרת הדוח למסך
         return jsonify({
-            "response": f"✅ החיבור ל-OpenAI הצליח! המפתח שלך עובד מצוין. תשובת המודל: {answer_from_ai}"
+            "response": (
+                f"✅ קריאת הקובץ הצליחה!<br>"
+                f"• גודל הקובץ הכולל: {file_size} תווים.<br>"
+                f"• מספר הבלוקים שזוהו בפירוק ראשוני: {len(chapters)}<br>"
+                f"• אורך טקסט פרק 1 שזוהה: {chapter_1_len} תווים.<br>"
+                f"• אורך טקסט פרק 2 שזוהה: {chapter_2_len} תווים.<br>"
+                f"• אורך טקסט פרק 3 שזוהה: {chapter_3_len} תווים.<br><br>"
+                f"אם אחד הפרקים מציג 0 תווים, סימן שהביטוי הרגולרי לא זיהה את כותרת הפרק בקובץ הטקסט שלך."
+            )
         })
 
     except Exception as e:
-        # אם יש שגיאה (למשל מפתח שגוי או חסום), נציג אותה ישירות למסך
         return jsonify({
-            "response": f"❌ החיבור נכשל. OpenAI החזירה את השגיאה הבאה: {str(e)}"
+            "response": f"❌ שגיאה בזמן קריאת הקובץ או הפירוק שלו: {str(e)}"
         })
 
 if __name__ == '__main__':
