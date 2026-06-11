@@ -7,59 +7,61 @@ from rapidfuzz import fuzz
 
 app = Flask(__name__)
 
-# --- בדיקת מפתח ה-API של OpenAI מתוך משתני הסביבה ---
+# שליפת מפתח ה-API
 openai_api_key = os.environ.get("OPENAI_API_KEY")
-if not openai_api_key:
-    print("🚨 אזהרה קריטית: OPENAI_API_KEY לא מוגדר במערכת!")
-else:
-    print("✅ מפתח OPENAI_API_KEY זוהה במערכת בהצלחה.")
-
-# אתחול קליינט OpenAI
 client = OpenAI(api_key=openai_api_key)
 
-# משתנים גלובליים שישמרו בזיכרון השרת עם העלייה
-LINKS_DICTIONARY = {}  # מילון קישורים מפרק 1
-CHUNKS_TEXTS = []      # טקסט גולמי של המנות (פרק 2 + פרק 3)
-CHUNKS_EMBEDDINGS = None # מערך הוקטורים בזיכרון
+# משתנים גלובליים
+LINKS_DICTIONARY = {}  
+CHUNKS_TEXTS = []      
+CHUNKS_EMBEDDINGS = None 
 
 def load_and_parse_terminal_data():
     """
-    טעינה וניתוח של קובץ הנהלים Terminal.txt בשיטה ישירה וחסינה
+    טעינה וניתוח של קובץ הנהלים Terminal.txt בסריקת שורות חסינה
     """
     global LINKS_DICTIONARY, CHUNKS_TEXTS, CHUNKS_EMBEDDINGS
     
     if not openai_api_key:
-        print("⚠️ עצירת טעינת הנתונים: חסר מפתח API.")
+        print("🚨 חסר מפתח API של OpenAI.")
         return
 
     file_path = os.path.join(os.path.dirname(__file__), 'data', 'Terminal.txt')
     if not os.path.exists(file_path):
-        print(f"⚠️ שגיאה: הקובץ בכתובת {file_path} לא נמצא!")
+        print(f"⚠️ הקובץ בכתובת {file_path} לא נמצא!")
         return
 
     with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
+        lines = f.readlines()
 
-    # נירמול ירידות שורה
-    content = content.replace('\r\n', '\n')
+    current_chapter = 0
+    chapter_1_lines = []
+    chapter_2_lines = []
+    chapter_3_lines = []
 
-    # --- מנגנון חיתוך ישיר וחסין ללא תלות במקפים ---
-    # מוצאים את המיקומים של כותרות הפרקים בטקסט
-    idx_p1 = content.find("פרק 1")
-    idx_p2 = content.find("פרק 2")
-    idx_p3 = content.find("פרק 3")
+    # מעבר שורה-שורה וחלוקה לפרקים בצורה חסינת רווחים ומקפים
+    for line in lines:
+        clean_line = line.strip()
+        if "פרק 1" in clean_line:
+            current_chapter = 1
+            continue
+        elif "פרק 2" in clean_line:
+            current_chapter = 2
+            continue
+        elif "פרק 3" in clean_line:
+            current_chapter = 3
+            continue
 
-    if idx_p1 == -1 or idx_p2 == -1 or idx_p3 == -1:
-        print("⚠️ אזהרה: לא כל הפרקים נמצאו בשיטה הישירה, מנסה חיתוך חלופי...")
-        # גיבוי קל במקרה של הבדלי רווחים
-        idx_p1 = content.find("פרק 1") if idx_p1 != -1 else 0
-        idx_p2 = content.find("פרק 2") if idx_p2 != -1 else content.find("שאלות ותשובות")
-        idx_p3 = content.find("פרק 3") if idx_p3 != -1 else content.find("תיאור אתר מייצגים")
+        if current_chapter == 1:
+            chapter_1_lines.append(line)
+        elif current_chapter == 2:
+            chapter_2_lines.append(line)
+        elif current_chapter == 3:
+            chapter_3_lines.append(line)
 
-    # בידוד הטקסט של כל פרק על פי המיקומים
-    chapter_1_text = content[idx_p1:idx_p2]
-    chapter_2_text = content[idx_p2:idx_p3]
-    chapter_3_text = content[idx_p3:]
+    chapter_1_text = "".join(chapter_1_lines)
+    chapter_2_text = "".join(chapter_2_lines)
+    chapter_3_text = "".join(chapter_3_lines)
 
     # --- 1. עיבוד פרק 1: הגדרות קישורים גלובליות ---
     link_matches = re.findall(r'>>([^:]+):\s*(https?://[^\s<]+)<<', chapter_1_text)
@@ -74,7 +76,7 @@ def load_and_parse_terminal_data():
         if block_clean and "תשובה:" in block_clean:
             CHUNKS_TEXTS.append(block_clean)
 
-    # --- 3. עיבוד פרק 3: תיאור אתר מייצגים (דפי מייצגים) ---
+    # --- 3. עיבוד פרק 3: תיאור אתר מייצגים ---
     page_blocks = re.split(r'(?=דף מייצגים - \d+)', chapter_3_text)
     for block in page_blocks:
         block_clean = block.strip()
@@ -83,7 +85,7 @@ def load_and_parse_terminal_data():
 
     print(f"Total structured chunks extracted: {len(CHUNKS_TEXTS)}")
 
-    # --- 4. וקטוריזציה מראש (Embedding) של כל המנות ---
+    # --- 4. וקטוריזציה מראש (Embedding) ---
     if CHUNKS_TEXTS:
         try:
             response = client.embeddings.create(
@@ -95,11 +97,10 @@ def load_and_parse_terminal_data():
         except Exception as e:
             print(f"❌ Error generating initial embeddings: {e}")
 
-# הפעלת הפונקציה בזמן עליית השרת
+# הפעלת הפונקציה מיד עם עליית השרת
 load_and_parse_terminal_data()
 
 def get_embedding(text):
-    """הפיכת שאלת המשתמש לוקטור"""
     response = client.embeddings.create(
         input=[text],
         model="text-embedding-3-small"
@@ -107,7 +108,6 @@ def get_embedding(text):
     return response.data[0].embedding
 
 def inject_hyperlinks(text):
-    """השתלת קישורים בצורה אוטומטית מטקסט בתוך סוגריים מרובעים"""
     for name, url in LINKS_DICTIONARY.items():
         placeholder = f"[{name}]"
         if placeholder in text:
@@ -144,12 +144,11 @@ def chat():
     # ג. שקלול היברידי (70% סמנטי, 30% מילולי)
     combined_scores = (semantic_scores * 0.7) + (np.array(fuzzy_scores) * 0.3)
     
-    # שליפת 3 המנות הכי מתאימות
     top_indices = np.argsort(combined_scores)[-3:][::-1]
     retrieved_chunks = [CHUNKS_TEXTS[idx] for idx in top_indices]
     context = "\n\n---\n\n".join(retrieved_chunks)
 
-    # ד. בניית ה-Prompt ל-OpenAI
+    # ד. בניית ה-Prompt
     messages = [
         {
             "role": "system", 
@@ -173,7 +172,6 @@ def chat():
         "content": f"מידע מהנהלים:\n{context}\n\nהשאלה הנוכחית של המשתמש: {user_question}"
     })
 
-    # ה. פנייה ל-OpenAI לקבלת תשובה חכמה
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
