@@ -11,9 +11,9 @@ app = Flask(__name__)
 openai_api_key = os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=openai_api_key)
 
-# משתנים גלובליים לשמירה בזיכרון השרת
-LINKS_DICTIONARY = {}  # קישורים מפרק 1 בלבד
-CHUNKS_TEXTS = []      # מנות מידע מפרק 2 ופרק 3 בלבד
+# משתנים גלובליים
+LINKS_DICTIONARY = {}  
+CHUNKS_TEXTS = []      
 CHUNKS_EMBEDDINGS = None 
 
 def load_and_parse_terminal_data():
@@ -34,10 +34,10 @@ def load_and_parse_terminal_data():
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # נירמול ירידות שורה למניעת בעיות שרת
+    # נירמול ירידות שורה
     content = content.replace('\r\n', '\n').replace('\r', '\n')
 
-    # חיתוך לפי כותרות הפרקים החדשות שסומנו ב-===
+    # חיתוך לפי כותרות פרקים
     parts = re.split(r'===(פרק \d+)===', content)
     
     chapter_1_text = ""
@@ -55,8 +55,8 @@ def load_and_parse_terminal_data():
         elif "פרק 3" in header:
             chapter_3_text = body
 
-    # --- 1. עיבוד פרק 1: חילוץ קישורים בלבד ---
-    link_matches = re.findall(r'>>([^:]+):\s*(https?://[^\s<]+)<<', chapter_1_text)
+    # --- 1. עיבוד פרק 1: חילוץ קישורים ומיילים ---
+    link_matches = re.findall(r'>>([^:]+):\s*([^\s<<]+)<<', chapter_1_text)
     for name, url in link_matches:
         LINKS_DICTIONARY[name.strip()] = url.strip()
     print(f"Loaded {len(LINKS_DICTIONARY)} global links from Chapter 1.")
@@ -68,16 +68,16 @@ def load_and_parse_terminal_data():
         if block_clean and "תשובה:" in block_clean:
             CHUNKS_TEXTS.append(block_clean)
 
-    # --- 3. עיבוד פרק 3: תיאור אתר מייצגים (דפי מייצגים) ---
+    # --- 3. עיבוד פרק 3: תיאור אתר מייצגים ---
     page_blocks = re.split(r'(?=דף מייצגים - \d+)', chapter_3_text)
     for block in page_blocks:
         block_clean = block.strip()
         if block_clean and ("נושא:" in block_clean or "הסבר והנחיות:" in block_clean):
             CHUNKS_TEXTS.append(block_clean)
 
-    print(f"Total structured chunks extracted from Ch2 and Ch3: {len(CHUNKS_TEXTS)}")
+    print(f"Total structured chunks extracted: {len(CHUNKS_TEXTS)}")
 
-    # --- 4. יצירת וקטורים (Embeddings) מראש ---
+    # --- 4. וקטוריזציה מראש ---
     if CHUNKS_TEXTS:
         try:
             response = client.embeddings.create(
@@ -89,7 +89,6 @@ def load_and_parse_terminal_data():
         except Exception as e:
             print(f"❌ Error generating embeddings: {e}")
 
-# הפעלת הטעינה עם עליית השרת
 load_and_parse_terminal_data()
 
 def get_embedding(text):
@@ -100,11 +99,19 @@ def get_embedding(text):
     return response.data[0].embedding
 
 def inject_hyperlinks(text):
-    """השתלת קישורים אוטומטית לפי מילון הקישורים שחולץ מפרק 1"""
+    """
+    השתלת קישורים חכמה: תומכת בקישורי אינטרנט רגילים ובקישורי אימייל (mailto)
+    """
     for name, url in LINKS_DICTIONARY.items():
         placeholder = f"[{name}]"
         if placeholder in text:
-            hyperlink = f'<a href="{url}" style="color: #007bff; text-decoration: underline; font-weight: bold;" target="_blank">{name}</a>'
+            # בודק אם הכתובת היא אימייל (מכילה @ ולא מתחילה ב-http)
+            if "@" in url and not url.startswith("http"):
+                href_target = f"mailto:{url}"
+            else:
+                href_target = url
+                
+            hyperlink = f'<a href="{href_target}" style="color: #007bff; text-decoration: underline; font-weight: bold;" target="_blank">{name}</a>'
             text = text.replace(placeholder, hyperlink)
     return text
 
@@ -122,38 +129,39 @@ def chat():
         return jsonify({"response": "לא התקבלה שאלה תקינה."})
 
     if not CHUNKS_TEXTS or CHUNKS_EMBEDDINGS is None:
-        return jsonify({"response": "מערכת הנתונים של הטרמינל אינה טעונה כראוי בשרת. ודא שהגדרת את משתנה הסביבה OPENAI_API_KEY ב-Fly.io וששם הקובץ הוא Terminal.txt."})
+        return jsonify({"response": "מערכת הנתונים של הטרמינל אינה טעונה כראוי בשרת."})
 
-    # א. חישוב מרחק סמנטי
     user_vector = get_embedding(user_question)
     semantic_scores = np.dot(CHUNKS_EMBEDDINGS, user_vector)
 
-    # ב. חיפוש מילולי גמיש (Fuzzy Match) לגיבוי
     fuzzy_scores = []
     for chunk in CHUNKS_TEXTS:
         score = fuzz.partial_ratio(user_question, chunk) / 100.0
         fuzzy_scores.append(score)
 
-    # ג. שילוב היברידי (70% סמנטי, 30% מילולי)
     combined_scores = (semantic_scores * 0.7) + (np.array(fuzzy_scores) * 0.3)
     
-    # שליפת 3 המנות הכי רלוונטיות מתוך פרקים 2 ו-3
     top_indices = np.argsort(combined_scores)[-3:][::-1]
     retrieved_chunks = [CHUNKS_TEXTS[idx] for idx in top_indices]
     context = "\n\n---\n\n".join(retrieved_chunks)
 
-    # ד. בניית הפרומפט
+    # עדכון ה-System Prompt לניסוח שירותי חופשי, שמירה על מבנה ועימוד
     messages = [
         {
             "role": "system", 
             "content": (
-                "אתה עוזר דיגיטלי מקצועי וידידותי של אתר מייצגים בגביה של הביטוח הלאומי. "
-                "תפקידך לענות לנציגים ולמייצגים בצורה ברורה, תמציתית ומדויקת על בסיס נהלי הטרמינל בלבד.\n\n"
-                "הנחיות קשיחות לגבי התשובה:\n"
-                "1. ענה אך ורק על סמך המידע הנמצא תחת קטגוריית 'מידע מהנהלים' המצורף מטה.\n"
-                "2. אם המידע לא קיים בהקשר המצורף, אמור בעדינות: 'אין לי הנחיה מפורשת בנושא זה בנהלי הטרמינל'. אל תמציא שום עובדה או נוהל!\n"
-                "3. אם בתוך קטגוריית 'מידע מהנהלים' מופיע שם של אתר או שירות בתוך סוגריים מרובעים, למשל [אתר מייצגים בגביה], עליך להקפיד לכתוב אותו בדיוק כך בתשובתך עם הסוגריים המרובעים (למשל: [אתר מייצגים בגביה]), כדי שהמערכת האוטומטית תוכל להשתיל שם קישור.\n"
-                "4. שמור על שיח ענייני ומקצועי המותאם למייצגים."
+                "אתה עוזר דיגיטלי מקצועי, שירותי וידידותי של אתר מייצגים בגביה של הביטוח הלאומי.\n"
+                "תפקידך לענות לנציגים ומייצגים בצורה ברורה, נעימה ומסודרת.\n\n"
+                "הנחיות קשיחות לגבי עימוד ומבנה התשובה (קריטי לקריאות):\n"
+                "1. חובה להפריד שלבים, סעיפים או הנחיות לשורות נפרדות לחלוטין! אל תכתוב אותם ברצף כפסקה אחת.\n"
+                "2. בכל פעם שיש רשימה, השתמש בירידת שורה מלאה והתחל כל סעיף בשורה חדשה (לדוגמה:\n"
+                "1. שלב ראשון...\n"
+                "2. שלב שני...)\n\n"
+                "הנחיות לגבי תוכן וניסוח (מענה חכם):\n"
+                "1. הבס את תשובתך אך ורק על העובדות והנהלים המופיעים תחת 'מידע מהנהלים' המצורף מטה.\n"
+                "2. אל תעתיק את המידע בצורה עיוורת מילה במילה! נסח אותו מחדש בצורה שירותית, זורמת וקלה להבנה, תוך שמירה קפדנית על הדיוק המקצועי.\n"
+                "3. אם בתוך המידע מהנהלים מופיע ביטוי בסוגריים מרובעים (למשל [אתר מייצגים בגביה] או כתובת אימייל כמו [b_meyazgim@nioi.gov.il]), עליך להקפיד לכתוב אותו בתשובתך בדיוק באותו אופן עם הסוגריים המרובעים, כדי שמערכת הקישורים תוכל להחליף אותו בלינק פעיל.\n"
+                "4. אם המידע לא קיים בהקשר, אמור בנימוס שאין לך הנחיה מפורשת בנושא בנהלי הטרמינל."
             )
         }
     ]
@@ -170,10 +178,14 @@ def chat():
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
-            temperature=0.2
+            temperature=0.4 # העלאת הטמפרטורה במעט (מ-0.2 ל-0.4) מאפשרת למודל גמישות רבה יותר בניסוח מחדש
         )
         raw_answer = response.choices[0].message.content
-        final_answer = inject_hyperlinks(raw_answer)
+        
+        # המרת ירידות שורה לתגיות HTML המוצגות כהלכה בדפדפן
+        formatted_answer = raw_answer.replace('\n', '<br>')
+        
+        final_answer = inject_hyperlinks(formatted_answer)
         return jsonify({"response": final_answer})
 
     except Exception as e:
