@@ -18,7 +18,7 @@ CHUNKS_EMBEDDINGS = None
 
 def load_and_parse_terminal_data():
     """
-    טעינה וניתוח של קובץ הנהלים Terminal.txt בסריקת שורות חסינה
+    טעינה וניתוח של קובץ הנהלים Terminal.txt בסריקת שורות חסינה וגמישה
     """
     global LINKS_DICTIONARY, CHUNKS_TEXTS, CHUNKS_EMBEDDINGS
     
@@ -32,23 +32,31 @@ def load_and_parse_terminal_data():
         return
 
     with open(file_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
+        content = f.read()
+
+    # נירמול כל סוגי ירידות השורה (מניעת בעיות תאימות בין Windows ל-Linux)
+    content = content.replace('\r\n', '\n').replace('\r', '\n')
+    lines = content.split('\n')
 
     current_chapter = 0
     chapter_1_lines = []
     chapter_2_lines = []
     chapter_3_lines = []
 
-    # מעבר שורה-שורה וחלוקה לפרקים בצורה חסינת רווחים ומקפים
+    # מעבר שורה-שורה עם זיהוי גמיש במיוחד של הפרקים
     for line in lines:
         clean_line = line.strip()
-        if "פרק 1" in clean_line:
+        if not clean_line:
+            continue
+            
+        # מחפש את התבנית "פרק 1", "פרק 2", "פרק 3" בכל מקום בשורה באופן גמיש
+        if re.search(r'פרק\s+1', clean_line):
             current_chapter = 1
             continue
-        elif "פרק 2" in clean_line:
+        elif re.search(r'פרק\s+2', clean_line):
             current_chapter = 2
             continue
-        elif "פרק 3" in clean_line:
+        elif re.search(r'פרק\s+3', clean_line):
             current_chapter = 3
             continue
 
@@ -59,9 +67,9 @@ def load_and_parse_terminal_data():
         elif current_chapter == 3:
             chapter_3_lines.append(line)
 
-    chapter_1_text = "".join(chapter_1_lines)
-    chapter_2_text = "".join(chapter_2_lines)
-    chapter_3_text = "".join(chapter_3_lines)
+    chapter_1_text = "\n".join(chapter_1_lines)
+    chapter_2_text = "\n".join(chapter_2_lines)
+    chapter_3_text = "\n".join(chapter_3_lines)
 
     # --- 1. עיבוד פרק 1: הגדרות קישורים גלובליות ---
     link_matches = re.findall(r'>>([^:]+):\s*(https?://[^\s<]+)<<', chapter_1_text)
@@ -85,7 +93,7 @@ def load_and_parse_terminal_data():
 
     print(f"Total structured chunks extracted: {len(CHUNKS_TEXTS)}")
 
-    # --- 4. וקטוריזציה מראש (Embedding) ---
+    # --- 4. וקטוריזציה מראש (Embedding) של כל המנות ---
     if CHUNKS_TEXTS:
         try:
             response = client.embeddings.create(
@@ -97,7 +105,7 @@ def load_and_parse_terminal_data():
         except Exception as e:
             print(f"❌ Error generating initial embeddings: {e}")
 
-# הפעלת הפונקציה מיד עם עליית השרת
+# הפעלת הטעינה מיד עם עליית השרת
 load_and_parse_terminal_data()
 
 def get_embedding(text):
@@ -131,7 +139,7 @@ def chat():
     if not CHUNKS_TEXTS or CHUNKS_EMBEDDINGS is None:
         return jsonify({"response": "מערכת הנתונים של הטרמינל אינה טעונה כראוי בשרת. ודא שהגדרת את משתנה הסביבה OPENAI_API_KEY ב-Fly.io וששם הקובץ הוא Terminal.txt."})
 
-    # א. מרחק סמנטי
+    # א. מרחק סמנטי (Cosine Similarity)
     user_vector = get_embedding(user_question)
     semantic_scores = np.dot(CHUNKS_EMBEDDINGS, user_vector)
 
@@ -148,7 +156,7 @@ def chat():
     retrieved_chunks = [CHUNKS_TEXTS[idx] for idx in top_indices]
     context = "\n\n---\n\n".join(retrieved_chunks)
 
-    # ד. בניית ה-Prompt
+    # ד. בניית ה-Prompt ל-OpenAI
     messages = [
         {
             "role": "system", 
