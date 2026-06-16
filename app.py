@@ -96,7 +96,7 @@ def load_and_parse_terminal_data():
     if CHUNKS_TEXTS:
         try:
             response = client.models.embed_content(
-                model="text-embedding-004",
+                model="models/text-embedding-004",
                 contents=CHUNKS_TEXTS
             )
             CHUNKS_EMBEDDINGS = np.array([item.values for item in response.embeddings])
@@ -113,7 +113,7 @@ def get_embedding(text):
     if client is None:
         return [0] * 768
     response = client.models.embed_content(
-        model="text-embedding-004",
+        model="models/text-embedding-004",
         contents=[text]
     )
     return response.embeddings[0].values
