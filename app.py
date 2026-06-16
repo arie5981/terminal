@@ -9,9 +9,16 @@ import markdown  # ספרייה להמרת Markdown ל-HTML תקני ויפה
 
 app = Flask(__name__)
 
-# שליפת מפתח ה-API של גוגל (השרת שולף את GEMINI_API_KEY מתוך הסביבה של Fly.io)
+# שליפת מפתח ה-API של גוגל באותיות גדולות
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
-client = genai.Client()
+
+# הגדרת לקוח בצורה בטוחה שלא תקריס את עליית השרת ב-Fly.io
+client = None
+if gemini_api_key:
+    try:
+        client = genai.Client(api_key=gemini_api_key)
+    except Exception as e:
+        print(f"🚨 כישלון באתחול הלקוח של גוגל: {e}")
 
 # משתנים גלובליים
 LINKS_DICTIONARY = {}  
@@ -24,11 +31,11 @@ def load_and_parse_terminal_data():
     """
     global LINKS_DICTIONARY, CHUNKS_TEXTS, CHUNKS_EMBEDDINGS
     
-    # בדיקה 1: האם מפתח ה-API קיים במערכת
-    if not gemini_api_key:
-        print("🚨 חסר מפתח API של Gemini (GEMINI_API_KEY).")
-        CHUNKS_TEXTS = ["שגיאה: מפתח ה-API לא הוגדר כראוי ב-Fly.io תחת השם GEMINI_API_KEY באותיות גדולות."]
-        CHUNKS_EMBEDDINGS = np.zeros((1, 768)) # וקטור דמיון זמני למניעת קריסה
+    # בדיקה 1: האם הלקוח או המפתח חסרים במערכת
+    if not gemini_api_key or client is None:
+        print("🚨 חסר מפתח API של Gemini (GEMINI_API_KEY) או שהלקוח לא אותחל.")
+        CHUNKS_TEXTS = ["שגיאה: מפתח ה-API לא הוגדר כראוי ב-Fly.io תחת השם GEMINI_API_KEY (אותיות גדולות בלבד!)."]
+        CHUNKS_EMBEDDINGS = np.zeros((1, 768)) 
         return
 
     # בדיקה 2: האם קובץ הטקסט קיים בנתיב המיועד
@@ -40,8 +47,13 @@ def load_and_parse_terminal_data():
         return
 
     # קריאת הקובץ
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception as e:
+        CHUNKS_TEXTS = [f"שגיאה בקריאת הקובץ: {e}"]
+        CHUNKS_EMBEDDINGS = np.zeros((1, 768))
+        return
 
     content = content.replace('\r\n', '\n').replace('\r', '\n')
     parts = re.split(r'===(פרק \d+)===', content)
@@ -65,7 +77,6 @@ def load_and_parse_terminal_data():
     link_matches = re.findall(r'>>([^:]+):\s*([^\s<<]+)<<', chapter_1_text)
     for name, url in link_matches:
         LINKS_DICTIONARY[name.strip()] = url.strip()
-    print(f"Loaded {len(LINKS_DICTIONARY)} global links.")
 
     # --- 2. עיבוד פרק 2: שאלות ותשובות נפוצות ---
     qna_blocks = re.split(r'(?=שאלה:)', chapter_2_text)
@@ -81,8 +92,6 @@ def load_and_parse_terminal_data():
         if block_clean and ("נושא:" in block_clean or "הסבר והנחיות:" in block_clean):
             CHUNKS_TEXTS.append(block_clean)
 
-    print(f"Total structured chunks extracted: {len(CHUNKS_TEXTS)}")
-
     # --- 4. וקטוריזציה מראש באמצעות מודל גוגל ---
     if CHUNKS_TEXTS:
         try:
@@ -91,17 +100,18 @@ def load_and_parse_terminal_data():
                 contents=CHUNKS_TEXTS
             )
             CHUNKS_EMBEDDINGS = np.array([item.values for item in response.embeddings])
-            print("Successfully generated Gemini embeddings. System is live!")
         except Exception as e:
             print(f"❌ Error generating embeddings: {e}")
             CHUNKS_TEXTS = [f"שגיאה בתהליך יצירת ה-Embeddings מול גוגל: {e}"]
             CHUNKS_EMBEDDINGS = np.zeros((1, 768))
 
-# הרצת פונקציית הטעינה מייד עם עליית האפליקציה
+# הרצת פונקציית הטעינה
 load_and_parse_terminal_data()
 
 def get_embedding(text):
     """יצירת וקטור לשאילתת המשתמש"""
+    if client is None:
+        return [0] * 768
     response = client.models.embed_content(
         model="text-embedding-004",
         contents=[text]
@@ -135,12 +145,12 @@ def chat():
     if not user_question:
         return jsonify({"response": "לא התקבלה שאלה תקינה."})
 
-    # אם שתלנו הודעת שגיאה בתוך המערך בשלב הטעינה, נחזיר אותה ישירות למסך למטרת דיבאג
+    # הדפסת הודעת שגיאה מובנית בצ'אט אם משהו נכשל בטעינה
     if CHUNKS_TEXTS and "שגיאה:" in CHUNKS_TEXTS[0]:
         return jsonify({"response": CHUNKS_TEXTS[0]})
 
-    if not CHUNKS_TEXTS or CHUNKS_EMBEDDINGS is None:
-        return jsonify({"response": "מערכת הנתונים של הטרמינל אינה טעונה כראוי בשרת."})
+    if not CHUNKS_TEXTS or CHUNKS_EMBEDDINGS is None or client is None:
+        return jsonify({"response": "מערכת הנתונים של הטרמינל או לקוח ה-AI אינם טעונים כראוי."})
 
     # חישוב סמנטי וחישוב פאזי (Fuzzy Match)
     user_vector = get_embedding(user_question)
@@ -153,12 +163,10 @@ def chat():
 
     combined_scores = (semantic_scores * 0.7) + (np.array(fuzzy_scores) * 0.3)
     
-    # שליפת 6 קטעי המידע הרלוונטיים ביותר
     top_indices = np.argsort(combined_scores)[-6:][::-1]
     retrieved_chunks = [CHUNKS_TEXTS[idx] for idx in top_indices]
     context = "\n\n---\n\n".join(retrieved_chunks)
 
-    # ה-System Prompt של הבוט
     system_instruction = (
         "אתה עוזר דיגיטלי מקצועי, שירותי וידידותי ביותר של אתר מייצגים בגביה של הביטוח הלאומי.\n"
         "תפקידך לספק תשובות מלאות, עשירות, מקיפות ונעימות מאוד לעין, בדיוק ברמה של צ'אטבוט מתקדמים.\n\n"
@@ -170,4 +178,39 @@ def chat():
         "1. הבס את תשובתך אך ורק על העובדות והנהלים המופיעים תחת 'מידע מהנהלים' המצורף מטה.\n"
         "2. חבר את המידע בצורה חכמה! אם השאלה נוגעת לחובות, ומופיע מידע על מספר שיטות (למשל: גם הרשאה לחיוב, גם הסדר בפריסה וגם הפקת שוברים), הצג את כל האפשרויות הללו למשתמש בצורה מאורגנת ומסווגת.\n"
         "3. נסח את הדברים בצורה שירותית, זורמת וחופשית - אל תעתיק משפטים יבשים מהקובץ מילה במילה, אלא תן חוויית מענה אנושית ואינטליגנטית.\n"
-        "4. אם מופיע ביטוי בסוגריים מרובעים (כמו [אתר מייצגים בגביה] או כתובת אימ
+        "4. אם מופיע ביטוי בסוגריים מרובעים (כמו [אתר מייצגים בגביה] או כתובת אימייל), שמור על הסוגריים המרובעים בדיוק כפי שהם בתשובתך."
+    )
+
+    contents = []
+    for msg in chat_history:
+        role = "model" if msg["role"] == "assistant" else "user"
+        contents.append(
+            types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])])
+        )
+
+    current_user_content = f"מידע מהנהלים:\n{context}\n\nהשאלה הנוכחית של המשתמש: {user_question}"
+    contents.append(
+        types.Content(role="user", parts=[types.Part.from_text(text=current_user_content)])
+    )
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.5
+            )
+        )
+        
+        raw_answer = response.text
+        html_answer = markdown.markdown(raw_answer, extensions=['nl2br'])
+        final_answer = inject_hyperlinks(html_answer)
+        return jsonify({"response": final_answer})
+
+    except Exception as e:
+        return jsonify({"response": f"מצטער, נתקלתי בשגיאה בתקשורת עם שרת ה-AI של גוגל: {e}"})
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
