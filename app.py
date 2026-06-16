@@ -1,7 +1,11 @@
 from flask import Flask, render_template, request, jsonify
 import os
+from google import genai
 
 app = Flask(__name__)
+
+# שליפת המפתח
+gemini_api_key = os.environ.get("GEMINI_API_KEY")
 
 @app.route('/')
 def home():
@@ -9,22 +13,28 @@ def home():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    # 1. שליפת המפתח מתוך השרת של Fly
-    gemini_api_key = os.environ.get("GEMINI_API_KEY")
-    
-    # 2. בדיקה אם המפתח קיים בכלל
+    # 1. בדיקה שהמפתח קיים
     if not gemini_api_key:
-        return jsonify({
-            "response": "❌ השרת לא מוצא שום משתנה סביבה בשם GEMINI_API_KEY. הוא ריק או לא קיים."
-        })
-    
-    # 3. אם הוא קיים - נציג את האורך שלו ואת 4 התווים הראשונים והאחרונים כדי לוודא תקינות
-    key_length = len(gemini_api_key)
-    masked_key = f"{gemini_api_key[:4]}...{gemini_api_key[-4:]}" if key_length > 8 else "קצר מדי"
-    
-    return jsonify({
-        "response": f"✅ המפתח נקרא בהצלחה! <br> אורך המפתח: {key_length} תווים. <br> תחילת וסוף המפתח: {masked_key}"
-    })
+        return jsonify({"response": "❌ מפתח ה-API חסר בשרת."})
+
+    # 2. אתחול הלקוח של גוגל בתוך הראוט עם המפתח המוכח
+    try:
+        client = genai.Client(api_key=gemini_api_key)
+    except Exception as e:
+        return jsonify({"response": f"❌ נכשל אתחול הלקוח של גוגל: {e}"})
+
+    # 3. שליחת שאילתה פשוטה וישירה ל-Gemini
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents="תגיד לי בבקשה 'שלום עולם, החיבור לג'מיני עובד!'"
+        )
+        
+        # 4. החזרת התשובה שגוגל שלח לנו
+        return jsonify({"response": f"✅ תקשורת הצליחה! הנה מה שגוגל ענה:<br><br> <b>{response.text}</b>"})
+
+    except Exception as gemini_err:
+        return jsonify({"response": f"❌ שגיאה בפנייה ל-Gemini API: {gemini_err}"})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
