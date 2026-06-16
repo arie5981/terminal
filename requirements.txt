@@ -1,4 +1,5 @@
 Flask
+google-genai
 gunicorn
 langchain-openai
 langchain-community
