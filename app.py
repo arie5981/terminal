@@ -25,14 +25,14 @@ def load_and_parse_terminal_data():
     global LINKS_DICTIONARY, CHUNKS_TEXTS, CHUNKS_EMBEDDINGS
     
     if not gemini_api_key:
-        print("🚨 חסר מפתח API של Gemini (GEMINI_API_KEY).")
+        CHUNKS_TEXTS = ["שגיאה: מפתח ה-API לא הוגדר כראוי ב-Fly.io תחת השם GEMINI_API_KEY באותיות גדולות."]
         return
 
     file_path = os.path.join(os.path.dirname(__file__), 'data', 'Terminal.txt')
     if not os.path.exists(file_path):
-        print(f"⚠️ הקובץ בכתובת {file_path} לא נמצא!")
+        CHUNKS_TEXTS = [f"שגיאה: הקובץ Terminal.txt לא נמצא בנתיב: {file_path}"]
         return
-
+        
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
