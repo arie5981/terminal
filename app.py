@@ -138,78 +138,91 @@ def home():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    data = request.json or {}
-    user_question = data.get('question', '').strip()
-    chat_history = data.get('history', [])
-
-    if not user_question:
-        return jsonify({"response": "לא התקבלה שאלה תקינה."})
-
-    # הדפסת הודעת שגיאה מובנית בצ'אט אם משהו נכשל בטעינה
-    if CHUNKS_TEXTS and "שגיאה:" in CHUNKS_TEXTS[0]:
-        return jsonify({"response": CHUNKS_TEXTS[0]})
-
-    if not CHUNKS_TEXTS or CHUNKS_EMBEDDINGS is None or client is None:
-        return jsonify({"response": "מערכת הנתונים של הטרמינל או לקוח ה-AI אינם טעונים כראוי."})
-
-    # חישוב סמנטי וחישוב פאזי (Fuzzy Match)
-    user_vector = get_embedding(user_question)
-    semantic_scores = np.dot(CHUNKS_EMBEDDINGS, user_vector)
-
-    fuzzy_scores = []
-    for chunk in CHUNKS_TEXTS:
-        score = fuzz.partial_ratio(user_question, chunk) / 100.0
-        fuzzy_scores.append(score)
-
-    combined_scores = (semantic_scores * 0.7) + (np.array(fuzzy_scores) * 0.3)
-    
-    top_indices = np.argsort(combined_scores)[-6:][::-1]
-    retrieved_chunks = [CHUNKS_TEXTS[idx] for idx in top_indices]
-    context = "\n\n---\n\n".join(retrieved_chunks)
-
-    system_instruction = (
-        "אתה עוזר דיגיטלי מקצועי, שירותי וידידותי ביותר של אתר מייצגים בגביה של הביטוח הלאומי.\n"
-        "תפקידך לספק תשובות מלאות, עשירות, מקיפות ונעימות מאוד לעין, בדיוק ברמה של צ'אטבוט מתקדמים.\n\n"
-        "הנחיות עיצוב ומבנה (Markdown תקני):\n"
-        "1. השתמש בהדגשות (כוכביות כפולות, למשל **טקסט מודגש**) עבור כותרות משנה, שלבים קריטיים, או שמות של תפריטים ומסלולים במערכת.\n"
-        "2. חלק את התשובה לפסקאות קטנות וברורות. השתמש ברשימות ממוספרות (1, 2, 3) או בנקודות (בוליטים) בצורה מרווחת ומסודרת.\n"
-        "3. התחל את התשובה בפתיח קצר ונעים (למשל: 'על פי נהלי התמיכה וההנחיות, הנה הדרכים לביצוע...'), וסיים בסיום שירותי.\n\n"
-        "הנחיות תוכן וניסוח:\n"
-        "1. הבס את תשובתך אך ורק על העובדות והנהלים המופיעים תחת 'מידע מהנהלים' המצורף מטה.\n"
-        "2. חבר את המידע בצורה חכמה! אם השאלה נוגעת לחובות, ומופיע מידע על מספר שיטות (למשל: גם הרשאה לחיוב, גם הסדר בפריסה וגם הפקת שוברים), הצג את כל האפשרויות הללו למשתמש בצורה מאורגנת ומסווגת.\n"
-        "3. נסח את הדברים בצורה שירותית, זורמת וחופשית - אל תעתיק משפטים יבשים מהקובץ מילה במילה, אלא תן חוויית מענה אנושית ואינטליגנטית.\n"
-        "4. אם מופיע ביטוי בסוגריים מרובעים (כמו [אתר מייצגים בגביה] או כתובת אימייל), שמור על הסוגריים המרובעים בדיוק כפי שהם בתשובתך."
-    )
-
-    contents = []
-    for msg in chat_history:
-        role = "model" if msg["role"] == "assistant" else "user"
-        contents.append(
-            types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])])
-        )
-
-    current_user_content = f"מידע מהנהלים:\n{context}\n\nהשאלה הנוכחית של המשתמש: {user_question}"
-    contents.append(
-        types.Content(role="user", parts=[types.Part.from_text(text=current_user_content)])
-    )
-
+    # עוטפים את כל הפונקציה מהרגע הראשון ב-try כולל כדי למנוע שגיאות 500
     try:
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.5
-            )
-        )
-        
-        raw_answer = response.text
-        html_answer = markdown.markdown(raw_answer, extensions=['nl2br'])
-        final_answer = inject_hyperlinks(html_answer)
-        return jsonify({"response": final_answer})
+        data = request.json or {}
+        user_question = data.get('question', '').strip()
+        chat_history = data.get('history', [])
 
-    except Exception as e:
-        return jsonify({"response": f"מצטער, נתקלתי בשגיאה בתקשורת עם שרת ה-AI של גוגל: {e}"})
+        if not user_question:
+            return jsonify({"response": "לא התקבלה שאלה תקינה."})
+
+        if CHUNKS_TEXTS and "שגיאה:" in CHUNKS_TEXTS[0]:
+            return jsonify({"response": CHUNKS_TEXTS[0]})
+
+        if not CHUNKS_TEXTS or CHUNKS_EMBEDDINGS is None or client is None:
+            return jsonify({"response": "מערכת הנתונים של הטרמינל או לקוח ה-AI אינם טעונים כראוי."})
+
+        # הגנה ספציפית על שלב הוקטורים והחישוב המתמטי
+        try:
+            user_vector = get_embedding(user_question)
+            semantic_scores = np.dot(CHUNKS_EMBEDDINGS, user_vector)
+        except Exception as math_err:
+            return jsonify({"response": f"שגיאה בחישוב הסמנטי (Numpy/Embedding): {math_err}"})
+
+        fuzzy_scores = []
+        for chunk in CHUNKS_TEXTS:
+            score = fuzz.partial_ratio(user_question, chunk) / 100.0
+            fuzzy_scores.append(score)
+
+        combined_scores = (semantic_scores * 0.7) + (np.array(fuzzy_scores) * 0.3)
+        
+        top_indices = np.argsort(combined_scores)[-6:][::-1]
+        retrieved_chunks = [CHUNKS_TEXTS[idx] for idx in top_indices]
+        context = "\n\n---\n\n".join(retrieved_chunks)
+
+        system_instruction = (
+            "אתה עוזר דיגיטלי מקצועי, שירותי וידידותי ביותר של אתר מייצגים בגביה של הביטוח הלאומי.\n"
+            "תפקידך לספק תשובות מלאות, עשירות, מקיפות ונעימות מאוד לעין, בדיוק ברמה של צ'אטבוט מתקדמים.\n\n"
+            "הנחיות עיצוב ומבנה (Markdown תקני):\n"
+            "1. השתמש בהדגשות (כוכביות כפולות, למשל **טקסט מודגש**) עבור כותרות משנה, שלבים קריטיים, או שמות של תפריטים ומסלולים במערכת.\n"
+            "2. חלק את התשובה לפסקאות קטנות וברורות. השתמש ברשימות ממוספרות (1, 2, 3) או בנקודות (בוליטים) בצורה מרווחת ומסודרת.\n"
+            "3. התחל את התשובה בפתיח קצר ונעים (למשל: 'על פי נהלי התמיכה וההנחיות, הנה הדרכים לביצוע...'), וסיים בסיום שירותי.\n\n"
+            "הנחיות תוכן וניסוח:\n"
+            "1. הבס את תשובתך אך ורק על העובדות והנהלים המופיעים תחת 'מידע מהנהלים' המצורף מטה.\n"
+            "2. חבר את המידע בצורה חכמה! אם השאלה נוגעת לחובות, ומופיע מידע על מספר שיטות (למשל: גם הרשאה לחיוב, גם הסדר בפריסה וגם הפקת שוברים), הצג את כל האפשרויות הללו למשתמש בצורה מאורגנת ומסווגת.\n"
+            "3. נסח את הדברים בצורה שירותית, זורמת וחופשית - אל תעתיק משפטים יבשים מהקובץ מילה במילה, אלא תן חוויית מענה אנושית ואינטליגנטית.\n"
+            "4. אם מופיע ביטוי בסוגריים מרובעים (כמו [אתר מייצגים בגביה] או כתובת אימייל), שמור על הסוגריים המרובעים בדיוק כפי שהם בתשובתך."
+        )
+
+        # הגנה על בניית ה-Contents (היסטוריה)
+        try:
+            contents = []
+            for msg in chat_history:
+                role = "model" if msg["role"] == "assistant" else "user"
+                contents.append(
+                    types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])])
+                )
+
+            current_user_content = f"מידע מהנהלים:\n{context}\n\nהשאלה הנוכחית של המשתמש: {user_question}"
+            contents.append(
+                types.Content(role="user", parts=[types.Part.from_text(text=current_user_content)])
+            )
+        except Exception as history_err:
+            return jsonify({"response": f"שגיאה במבנה היסטוריית השיחה: {history_err}"})
+
+        # פנייה לגוגל
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.5-flash",
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.5
+                )
+            )
+            
+            raw_answer = response.text
+            html_answer = markdown.markdown(raw_answer, extensions=['nl2br'])
+            final_answer = inject_hyperlinks(html_answer)
+            return jsonify({"response": final_answer})
+
+        except Exception as gemini_err:
+            return jsonify({"response": f"שגיאה מצד השרתים של גוגל (Gemini API): {gemini_err}"})
+
+    except Exception as global_err:
+        # תפיסת כל שגיאה לא צפויה אחרת והחזרתה כ-JSON תקין (סטטוס 200) כדי שה-JS לא יתרסק
+        return jsonify({"response": f"שגיאה כללית בקוד השרת: {global_err}"})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
