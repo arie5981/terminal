@@ -10,7 +10,7 @@ import markdown  # ספרייה להמרת Markdown ל-HTML תקני ויפה
 app = Flask(__name__)
 
 # שליפת מפתח ה-API של גוגל (המערכת שולפת אוטומטית את GEMINI_API_KEY מתוך הסביבה)
-gemini_api_key = os.environ.get("Gemini_API_Key")
+gemini_api_key = os.environ.get("GEMINI_API_KEY")
 client = genai.Client()
 
 # משתנים גלובליים
