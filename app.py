@@ -44,7 +44,7 @@ def initialize_rag_system():
             elif "פרק 3" in header:
                 chapter_3_text = body
 
-        # --- 📋 חילוץ מתוקן וגמיש לפרק 2 ---
+        # --- 📋 חילוץ מפרק 2 ---
         local_chunks = []
         qna_blocks = re.split(r'\n(?=שאלה:)', chapter_2_text)
         for block in qna_blocks:
@@ -67,7 +67,7 @@ def initialize_rag_system():
         # עדכון רשימת הטקסטים הגלובלית
         CHUNKS_TEXTS = local_chunks
 
-        # --- 🧠 יצירת ה-Embeddings בחלוקה לקבוצות (Batches) של 50 כדי למנוע את מגבלת ה-100 ---
+        # --- 🧠 יצירת ה-Embeddings עם המודל הנתמך text-embedding-005 ---
         if CHUNKS_TEXTS:
             client = genai.Client(api_key=gemini_api_key)
             all_embeddings = []
@@ -76,14 +76,12 @@ def initialize_rag_system():
             for i in range(0, len(CHUNKS_TEXTS), batch_size):
                 batch = CHUNKS_TEXTS[i:i + batch_size]
                 response = client.models.embed_content(
-                    model="text-embedding-004",
+                    model="text-embedding-005",  # שינוי שם המודל לגרסה הנתמכת ב-v1
                     contents=batch
                 )
-                # חילוץ הוקטורים מהקבוצה הנוכחית
                 for item in response.embeddings:
                     all_embeddings.append(item.values)
             
-            # המרה סופית למטריצת Numpy אחת שלמה
             CHUNKS_EMBEDDINGS = np.array(all_embeddings)
             
     except Exception as e:
@@ -112,11 +110,11 @@ def chat():
     rows, columns = CHUNKS_EMBEDDINGS.shape
     
     return jsonify({
-        "response": f"✅ <b>שלב ה-Embeddings עבר בהצלחה מושלמת ללא שגיאות מגבלה!</b><br><br>"
+        "response": f"✅ <b>שלב ה-Embeddings עבר בהצלחה מושלמת ללא שגיאות!</b><br><br>"
                     f"📊 <b>נתוני המטריצה שנוצרה בזיכרון השרת:</b><br>"
                     f"• מספר יחידות מידע שמופו (Rows): {rows} (תואם במדויק ל-136 היחידות שלך!)<br>"
                     f"• אורך וקטור של גוגל (Columns): {columns} ממדים לכל יחידת מידע.<br><br>"
-                    f"🚀 הזיכרון הסמנטי מוכן ומחולק נכון. מה לדעתך השלב הבא?"
+                    f"🚀 הזיכרון הסמנטי מוכן סופית עם מודל 005. מחכה לתוצאה שלך!"
     })
 
 if __name__ == '__main__':
