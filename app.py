@@ -35,7 +35,6 @@ def load_and_parse_terminal_data():
     if not gemini_api_key or client is None:
         print("🚨 חסר מפתח API של Gemini (GEMINI_API_KEY) או שהלקוח לא אותחל.")
         CHUNKS_TEXTS = ["שגיאה: מפתח ה-API לא הוגדר כראוי ב-Fly.io תחת השם GEMINI_API_KEY (אותיות גדולות בלבד!)."]
-        CHUNKS_EMBEDDINGS = np.zeros((1, 768)) 
         return
 
     # בדיקה 2: האם קובץ הטקסט קיים בנתיב המיועד
@@ -43,7 +42,6 @@ def load_and_parse_terminal_data():
     if not os.path.exists(file_path):
         print(f"⚠️ הקובץ בכתובת {file_path} לא נמצא!")
         CHUNKS_TEXTS = [f"שגיאה: הקובץ Terminal.txt לא נמצא בנתיב השרת: {file_path}"]
-        CHUNKS_EMBEDDINGS = np.zeros((1, 768))
         return
 
     # קריאת הקובץ
@@ -52,7 +50,6 @@ def load_and_parse_terminal_data():
             content = f.read()
     except Exception as e:
         CHUNKS_TEXTS = [f"שגיאה בקריאת הקובץ: {e}"]
-        CHUNKS_EMBEDDINGS = np.zeros((1, 768))
         return
 
     content = content.replace('\r\n', '\n').replace('\r', '\n')
@@ -95,15 +92,15 @@ def load_and_parse_terminal_data():
     # --- 4. וקטוריזציה מראש באמצעות מודל גוגל ---
     if CHUNKS_TEXTS:
         try:
+            # שינוי השם לשם הנקי ללא תוספות שיוצרות כפל נתיבים
             response = client.models.embed_content(
-                model="models/text-embedding-004",
+                model="text-embedding-004",
                 contents=CHUNKS_TEXTS
             )
             CHUNKS_EMBEDDINGS = np.array([item.values for item in response.embeddings])
         except Exception as e:
             print(f"❌ Error generating embeddings: {e}")
             CHUNKS_TEXTS = [f"שגיאה בתהליך יצירת ה-Embeddings מול גוגל: {e}"]
-            CHUNKS_EMBEDDINGS = np.zeros((1, 768))
 
 # הרצת פונקציית הטעינה
 load_and_parse_terminal_data()
@@ -113,7 +110,7 @@ def get_embedding(text):
     if client is None:
         return [0] * 768
     response = client.models.embed_content(
-        model="models/text-embedding-004",
+        model="text-embedding-004",
         contents=[text]
     )
     return response.embeddings[0].values
@@ -138,7 +135,6 @@ def home():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    # עוטפים את כל הפונקציה מהרגע הראשון ב-try כולל כדי למנוע שגיאות 500
     try:
         data = request.json or {}
         user_question = data.get('question', '').strip()
@@ -147,13 +143,14 @@ def chat():
         if not user_question:
             return jsonify({"response": "לא התקבלה שאלה תקינה."})
 
+        # עצירה מובנית והצגת שגיאות מערכת או תקשורת ישירות למסך
         if CHUNKS_TEXTS and "שגיאה:" in CHUNKS_TEXTS[0]:
             return jsonify({"response": CHUNKS_TEXTS[0]})
 
         if not CHUNKS_TEXTS or CHUNKS_EMBEDDINGS is None or client is None:
-            return jsonify({"response": "מערכת הנתונים של הטרמינל או לקוח ה-AI אינם טעונים כראוי."})
+            return jsonify({"response": "מערכת הנתונים של הטרמינל או לקוח ה-AI אינם טעונים כראוי בשרת."})
 
-        # הגנה ספציפית על שלב הוקטורים והחישוב המתמטי
+        # שלב הוקטורים והחישוב המתמטי
         try:
             user_vector = get_embedding(user_question)
             semantic_scores = np.dot(CHUNKS_EMBEDDINGS, user_vector)
@@ -185,7 +182,7 @@ def chat():
             "4. אם מופיע ביטוי בסוגריים מרובעים (כמו [אתר מייצגים בגביה] או כתובת אימייל), שמור על הסוגריים המרובעים בדיוק כפי שהם בתשובתך."
         )
 
-        # הגנה על בניית ה-Contents (היסטוריה)
+        # בניית היסטוריית השיחה
         try:
             contents = []
             for msg in chat_history:
@@ -201,7 +198,7 @@ def chat():
         except Exception as history_err:
             return jsonify({"response": f"שגיאה במבנה היסטוריית השיחה: {history_err}"})
 
-        # פנייה לגוגל
+        # פנייה ל-Gemini 3.5 Flash
         try:
             response = client.models.generate_content(
                 model="gemini-3.5-flash",
@@ -221,7 +218,6 @@ def chat():
             return jsonify({"response": f"שגיאה מצד השרתים של גוגל (Gemini API): {gemini_err}"})
 
     except Exception as global_err:
-        # תפיסת כל שגיאה לא צפויה אחרת והחזרתה כ-JSON תקין (סטטוס 200) כדי שה-JS לא יתרסק
         return jsonify({"response": f"שגיאה כללית בקוד השרת: {global_err}"})
 
 if __name__ == '__main__':
