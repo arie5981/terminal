@@ -1,0 +1,7 @@
+Flask
+google-genai
+gunicorn
+langchain-community
+faiss-cpu
+rapidfuzz
+markdown
