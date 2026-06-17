@@ -4,17 +4,8 @@ import re
 import numpy as np
 from google import genai
 from rapidfuzz import fuzz
-from sentence_transformers import SentenceTransformer, util
 
 app = Flask(__name__)
-
-# טעינת מודל סמנטי קל ואיכותי שרץ מקומית על השרת (תומך רב-לשוני ומצוין לעברית)
-# המודל נטען פעם אחת בלבד עם עליית השרת
-try:
-    semantic_model = SentenceTransformer('sentence-transformers/LabSE')
-except Exception as e:
-    print(f"Error loading local semantic model: {e}")
-    semantic_model = None
 
 @app.route('/')
 def home():
@@ -77,68 +68,73 @@ def chat():
         all_chunks = chunks_chapter_2 + chunks_chapter_3
         total_chunks = len(all_chunks)
 
-        # === שלב 5 הסופי: מנוע RAG משולב מקומי (חסין שגיאות רשת) ===
+        # === שלב 5: מנוע RAG משולב באמצעות השם המלא המדויק של גוגל ===
         retrieval_status = ""
         retrieved_results_html = ""
         
-        if user_question:
-            # 1. חלק פאזי מקומי
-            fuzzy_scores = []
-            for chunk in all_chunks:
+        if user_question and gemini_api_key:
+            # 1. סינון פאזי מוקדם ל-30 מועמדים (מהיר וקל)
+            fuzzy_scored_chunks = []
+            for idx, chunk in enumerate(all_chunks):
                 f_score = fuzz.partial_ratio(user_question, chunk) / 100.0
-                fuzzy_scores.append(f_score)
-
-            # 2. חלק סמנטי מקומי (רץ על השרת שלך - ללא פנייה לגוגל!)
-            is_semantic_valid = False
-            if semantic_model:
-                try:
-                    # יצירת וקטורים מקומית
-                    user_embedding = semantic_model.encode(user_question, convert_to_tensor=True)
-                    chunks_embeddings = semantic_model.encode(all_chunks, convert_to_tensor=True)
-                    
-                    # חישוב מרחק קוסינוס סמנטי
-                    semantic_scores_tensor = util.cos_sim(user_embedding, chunks_embeddings)[0]
-                    semantic_scores = semantic_scores_tensor.cpu().numpy()
-                    is_semantic_valid = True
-                    retrieval_status = "✅ החיפוש המשולב (סמנטי מקומי + פאזי) פועל ב-100% יציבות ללא תלות ברשת!"
-                except Exception as local_emb_err:
-                    semantic_scores = np.zeros(len(all_chunks))
-                    retrieval_status = f"⚠️ חישוב סמנטי מקומי נכשל: {local_emb_err}"
-            else:
-                semantic_scores = np.zeros(len(all_chunks))
-                retrieval_status = "⚠️ המודל הסמנטי המקומי לא נטען באתחול השרת."
-
-            # 3. שילוב הציונים (70% סמנטי מקומי + 30% פאזי)
-            if is_semantic_valid:
-                combined_scores = (semantic_scores * 0.7) + (np.array(fuzzy_scores) * 0.3)
-            else:
-                combined_scores = np.array(fuzzy_scores)
-
-            # שליפת 3 המקומות הראשונים
-            top_indices = np.argsort(combined_scores)[-3:][::-1]
+                fuzzy_scored_chunks.append((f_score, idx, chunk))
             
-            for idx, position in enumerate(top_indices, 1):
-                chunk_text = all_chunks[position]
+            fuzzy_scored_chunks.sort(key=lambda x: x[0], reverse=True)
+            candidate_chunks_info = fuzzy_scored_chunks[:30]
+            
+            candidate_texts = [item[2] for item in candidate_chunks_info]
+            candidate_fuzzy_scores = [item[0] for item in candidate_chunks_info]
+
+            # 2. פנייה לסמנטי עם השם המפורש והמלא
+            is_semantic_valid = False
+            try:
+                # שימוש בנתיב המלא כפי שגוגל דורשת בתיעוד הרשמי של google-genai
+                emb_response = client.models.embed_content(
+                    model="models/text-embedding-004",
+                    contents=[user_question] + candidate_texts
+                )
+                
+                embeddings = [item.values for item in emb_response.embeddings]
+                user_vector = np.array(embeddings[0])
+                chunks_vectors = np.array(embeddings[1:])
+                
+                semantic_scores = np.dot(chunks_vectors, user_vector)
+                is_semantic_valid = True
+                retrieval_status = "✅ החיפוש המשולב פועל כהלכה מול ה-API הרשמי של גוגל!"
+            except Exception as emb_err:
+                semantic_scores = np.zeros(len(candidate_texts))
+                retrieval_status = f"⚠️ סמנטי הושבת (מנגנון הגנה פאזי פעיל): {emb_err}"
+
+            # 3. שילוב ציונים (70% סמנטי + 30% פאזי)
+            if is_semantic_valid:
+                combined_candidate_scores = (semantic_scores * 0.7) + (np.array(candidate_fuzzy_scores) * 0.3)
+            else:
+                combined_candidate_scores = np.array(candidate_fuzzy_scores)
+            
+            top_candidate_indices = np.argsort(combined_candidate_scores)[-3:][::-1]
+            
+            for idx, pos in enumerate(top_candidate_indices, 1):
+                chunk_text = candidate_texts[pos]
                 short_text = chunk_text[:150] + "..." if len(chunk_text) > 150 else chunk_text
                 short_text_escaped = short_text.replace('\n', '<br>')
                 
-                sem_display = f"{semantic_scores[position]:.2f}" if is_semantic_valid else "לא זמין"
+                sem_display = f"{semantic_scores[pos]:.2f}" if is_semantic_valid else "לא זמין"
                 retrieved_results_html += (
                     f"📌 <b>תוצאה {idx}:</b><br>"
-                    f"• ציון סמנטי מקומי: {sem_display} | ציון פאזי: {fuzzy_scores[position]:.2f}<br>"
-                    f"• ציון משולב סופי: {combined_scores[position]:.2f}<br>"
+                    f"• ציון סמנטי: {sem_display} | ציון פאזי: {candidate_fuzzy_scores[pos]:.2f}<br>"
+                    f"• ציון משולב סופי: {combined_candidate_scores[pos]:.2f}<br>"
                     f"<code>{short_text_escaped}</code><br><br>"
                 )
         else:
-            retrieval_status = "💡 שלח שאלה כדי לראות את האלגוריתם המשולב בפעולה."
+            retrieval_status = "💡 שלח שאלה בצ'אט כדי להפעיל את החיפוש."
 
         return jsonify({
-            "response": f"🚧 <b>בדיקת שלבים טורית - שלב 5 (ארכיטקטורה מקומית חסינה) באוויר!</b><br><br>"
+            "response": f"🚧 <b>בדיקת שלבים טורית - שלב 5 הרשמי באוויר!</b><br><br>"
                         f"🔑 <b>1. בדיקת מפתח סביבה:</b><br>• {api_key_status}<br><br>"
                         f"🤖 <b>2. בדיקת קריאה לג'ימיני (Flash):</b><br>• {gemini_response_status}<br><br>"
                         f"📋 <b>3. ניתוח מסמך הנהלים (Terminal.txt):</b><br>"
                         f"• חולצו בהצלחה: <b>{total_chunks}</b> יחידות מידע.<br><br>"
-                        f"🧠 <b>5. מנוע RAG משולב (סמנטי מקומי מנותק רשת + פאזי):</b><br>"
+                        f"🧠 <b>5. מנוע RAG משולב (גוגל הרשמי):</b><br>"
                         f"• סטטוס: {retrieval_status}<br><br>"
                         f"{retrieved_results_html}"
         })
