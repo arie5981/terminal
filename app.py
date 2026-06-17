@@ -1,0 +1,109 @@
+from flask import Flask, render_template, request, jsonify
+import os
+import re
+from google import genai  # ספריית גוגל הרשמית
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return render_template('index.html')
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    # === שלב 1: קריאת ה-API KEY והדפסתו ===
+    gemini_api_key = os.environ.get("GEMINI_API_KEY")
+    if gemini_api_key:
+        # מציג את 4 התווים הראשונים והאחרונים כדי לוודא תקינות בלי לחשוף את כל המפתח בלוג
+        api_key_status = f"✅ נמצא (מתחיל ב-{gemini_api_key[:4]} ומסתיים ב-{gemini_api_key[-4:]})"
+    else:
+        api_key_status = "❌ לא נמצא! מפתח ה-API ריק."
+
+    # === שלב 2: פנייה ל-gemini-2.5-flash לקבלת תשובת "שלום עולם" ===
+    gemini_response_status = ""
+    if gemini_api_key:
+        try:
+            client = genai.Client(api_key=gemini_api_key)
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents="תגיד בדיוק את המילים הבאות: שלום עולם! הקישור לג'ימיני עובד.",
+            )
+            gemini_response_status = f"✅ תגובת המודל: \"{response.text.strip()}\""
+        except Exception as api_error:
+            gemini_response_status = f"❌ שגיאה בפנייה ל-Gemini: {api_error}"
+    else:
+        gemini_response_status = "❌ לא בוצעה פנייה כי המפתח חסר."
+
+    # === שלב 3: קריאת המסמך וניתוח הנתונים (הקוד המקור והיציב שלך) ===
+    file_path = os.path.join(os.path.dirname(__file__), 'data', 'Terminal.txt')
+    
+    if not os.path.exists(file_path):
+        return jsonify({
+            "response": f"📊 <b>סטטוס בדיקת מערכת:</b><br>"
+                        f"1️⃣ מפתח API: {api_key_status}<br>"
+                        f"2️⃣ פנייה למודל: {gemini_response_status}<br>"
+                        f"3️⃣ קובץ נהלים: ❌ קובץ הנהלים Terminal.txt לא נמצא בשרת."
+        })
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        # ניקוי ירידות שורה לפורמט אחיד
+        content = content.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # פירוק הנהלים לפי הפרקים הראשיים
+        parts = re.split(r'===(פרק \d+)===', content)
+        
+        chapter_2_text = ""
+        chapter_3_text = ""
+        
+        for i in range(1, len(parts), 2):
+            header = parts[i]
+            body = parts[i+1] if i+1 < len(parts) else ""
+            
+            if "פרק 2" in header:
+                chapter_2_text = body
+            elif "פרק 3" in header:
+                chapter_3_text = body
+
+        # --- 📋 חילוץ מתוקן וגמיש לפרק 2 ---
+        qna_blocks = re.split(r'\n(?=שאלה:)', chapter_2_text)
+        chunks_chapter_2 = []
+        for block in qna_blocks:
+            block_clean = block.strip()
+            if block_clean and "תשובה:" in block_clean:
+                chunks_chapter_2 = [] if not chunks_chapter_2 and not block_clean.startswith("שאלה:") else chunks_chapter_2
+                chunks_chapter_2.append(block_clean)
+        
+        if chapter_2_text.strip().startswith("שאלה:") and not any("מהו אתר מייצגים" in c for c in chunks_chapter_2):
+            first_block = chapter_2_text.split("שאלה:")[1].split("\nשאלה:")[0]
+            chunks_chapter_2.insert(0, f"שאלה:{first_block.strip()}")
+
+        # --- 🖥️ חילוץ פרק 3 ---
+        page_blocks = re.split(r'\n(?=דף מייצגים - \d+)', chapter_3_text)
+        chunks_chapter_3 = []
+        for block in page_blocks:
+            block_clean = block.strip()
+            if block_clean and ("נושא:" in block_clean or "הסבר והנחיות:" in block_clean):
+                chunks_chapter_3.append(block_clean)
+
+        total_chunks = len(chunks_chapter_2) + len(chunks_chapter_3)
+
+        # החזרת כל שלושת השלבים בצורה מסודרת לדף
+        return jsonify({
+            "response": f"🚧 <b>בדיקת שלבים טורית - הכל נשמר ועובד!</b><br><br>"
+                        f"🔑 <b>1. בדיקת מפתח סביבה:</b><br>• {api_key_status}<br><br>"
+                        f"🤖 <b>2. בדיקת קריאה לג'ימיני (Flash):</b><br>• {gemini_response_status}<br><br>"
+                        f"📋 <b>3. ניתוח מסמך הנהלים (Terminal.txt):</b><br>"
+                        f"• חולצו בהצלחה מפרק 2: <b>{len(chunks_chapter_2)}</b> שאלות ותשובות.<br>"
+                        f"• חולצו בהצלחה מפרק 3: <b>{len(chunks_chapter_3)}</b> דפי מערכת.<br>"
+                        f"📊 <b>סך הכל יחידות מידע מוכנות בזיכרון:</b> {total_chunks} יחידות."
+        })
+
+    except Exception as e:
+        return jsonify({"response": f"❌ שגיאה במהלך הרצת השלבים: {e}"})
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
