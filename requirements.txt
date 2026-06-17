@@ -6,4 +6,3 @@ faiss-cpu
 rapidfuzz
 markdown
 numpy
-sentence-transformers
