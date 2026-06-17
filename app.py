@@ -1,9 +1,7 @@
 from flask import Flask, render_template, request, jsonify
 import os
 import re
-import numpy as np
 from google import genai
-from google.genai import types  # ייבוא הגדרות טיפוסים למקרה הצורך
 from rapidfuzz import fuzz
 
 app = Flask(__name__)
@@ -28,7 +26,6 @@ def chat():
     gemini_response_status = ""
     if gemini_api_key:
         try:
-            # אתחול הלקוח הרגיל עבור ה-Flash
             client = genai.Client(api_key=gemini_api_key)
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
@@ -36,7 +33,7 @@ def chat():
             )
             gemini_response_status = f"✅ תגובת המודל: \"{response.text.strip()}\""
         except Exception as api_error:
-            gemini_response_status = f"❌ שגיאה בפנייה ל-Gemini (עומס זמני או שגיאה): {api_error}"
+            gemini_response_status = f"❌ שגיאה בפנייה ל-Gemini: {api_error}"
     else:
         gemini_response_status = "❌ לא בוצעה פנייה כי המפתח חסר."
 
@@ -45,10 +42,7 @@ def chat():
     
     if not os.path.exists(file_path):
         return jsonify({
-            "response": f"🚧 <b>בדיקת שלבים טורית:</b><br>"
-                        f"1️⃣ מפתח API: {api_key_status}<br>"
-                        f"2️⃣ פנייה למודל: {gemini_response_status}<br>"
-                        f"3️⃣ קובץ נהלים: ❌ קובץ הנהלים Terminal.txt לא נמצא בשרת."
+            "response": f"🚧 <b>בדיקת שלבים טורית:</b><br>1️⃣ API: {api_key_status}<br>3️⃣ קובץ: ❌ לא נמצא."
         })
 
     try:
@@ -60,124 +54,57 @@ def chat():
         
         chapter_2_text = ""
         chapter_3_text = ""
-        
         for i in range(1, len(parts), 2):
-            header = parts[i]
-            body = parts[i+1] if i+1 < len(parts) else ""
-            if "פרק 2" in header:
-                chapter_2_text = body
-            elif "פרק 3" in header:
-                chapter_3_text = body
+            if "פרק 2" in parts[i]: chapter_2_text = parts[i+1]
+            elif "פרק 3" in parts[i]: chapter_3_text = parts[i+1]
 
-        # חילוץ פרק 2
         qna_blocks = re.split(r'\n(?=שאלה:)', chapter_2_text)
-        chunks_chapter_2 = []
-        for block in qna_blocks:
-            block_clean = block.strip()
-            if block_clean and "תשובה:" in block_clean:
-                chunks_chapter_2 = [] if not chunks_chapter_2 and not block_clean.startswith("שאלה:") else chunks_chapter_2
-                chunks_chapter_2.append(block_clean)
+        chunks_chapter_2 = [b.strip() for b in qna_blocks if b.strip() and "תשובה:" in b]
         
-        if chapter_2_text.strip().startswith("שאלה:") and not any("מהו אתר מייצגים" in c for c in chunks_chapter_2):
-            first_block = chapter_2_text.split("שאלה:")[1].split("\nשאלה:")[0]
-            chunks_chapter_2.insert(0, f"שאלה:{first_block.strip()}")
-
-        # חילוץ פרק 3
         page_blocks = re.split(r'\n(?=דף מייצגים - \d+)', chapter_3_text)
-        chunks_chapter_3 = []
-        for block in page_blocks:
-            block_clean = block.strip()
-            if block_clean and ("נושא:" in block_clean or "הסבר והנחיות:" in block_clean):
-                chunks_chapter_3.append(block_clean)
+        chunks_chapter_3 = [b.strip() for b in page_blocks if b.strip() and ("נושא:" in b or "הסבר והנחיות:" in b)]
 
         all_chunks = chunks_chapter_2 + chunks_chapter_3
         total_chunks = len(all_chunks)
 
-        # === שלב 5 המעודכן: אכיפת גרסת v1 ב-Client לקבלת Embeddings יציב ===
-        retrieval_status = ""
-        retrieved_results_html = ""
+        # === שלב 5 המאבחן: הדפסת המודלים הנתמכים ישירות מגוגל ===
+        available_models_list = []
+        try:
+            # קריאה לפונקציה שגוגל ביקשה שנריץ: ListModels
+            for m in client.models.list():
+                # נסנן רק מודלים שמסוגלים לעשות Embedding (מכילים את המילה embed)
+                if 'embed' in m.name.lower() or 'embedding' in m.name.lower():
+                    available_models_list.append(f"• <code>{m.name}</code> (שיטות נתמכות: {m.supported_methods})")
+            
+            models_display = "<br>".join(available_models_list) if available_models_list else "• לא נמצאו מודלי Embedding ברשימה."
+            retrieval_status = "📊 <b>סריקת המודלים של גוגל הצליחה! הנה מה שבאמת פתוח בחשבון שלך:</b>"
+        except Exception as list_err:
+            models_display = f"❌ נכשל בשליפת רשימת המודלים: {list_err}"
+            retrieval_status = "⚠️ שגיאה בסריקת המודלים."
+
+        # מציג בינתיים את התוצאות הפאזיות שעובדות מעולה כגיבוי
+        retrieved_results_html = "<h3>🤖 תוצאות חיפוש פאזי (זמני לאבחון):</h3>"
+        fuzzy_scored_chunks = []
+        for chunk in all_chunks:
+            f_score = fuzz.partial_ratio(user_question, chunk) / 100.0
+            fuzzy_scored_chunks.append((f_score, chunk))
+        fuzzy_scored_chunks.sort(key=lambda x: x[0], reverse=True)
         
-        if user_question and gemini_api_key:
-            # 1. חישוב ציון פאזי מוקדם לכל 136 הצ'אנקים
-            fuzzy_scored_chunks = []
-            for idx, chunk in enumerate(all_chunks):
-                f_score = fuzz.partial_ratio(user_question, chunk) / 100.0
-                fuzzy_scored_chunks.append((f_score, idx, chunk))
-            
-            # מיון ושליפת 30 המועמדים המובילים
-            fuzzy_scored_chunks.sort(key=lambda x: x[0], reverse=True)
-            candidate_chunks_info = fuzzy_scored_chunks[:30]
-            
-            candidate_texts = [item[2] for item in candidate_chunks_info]
-            candidate_fuzzy_scores = [item[0] for item in candidate_chunks_info]
+        for idx, (score, chunk_text) in enumerate(fuzzy_scored_chunks[:2], 1):
+            retrieved_results_html += f"📌 <b>תוצאה {idx} (פאזי: {score:.2f}):</b><br><code>{chunk_text[:120]}...</code><br><br>"
 
-            # 2. אתחול קליינט ייעודי ל-Embeddings שמכריח שימוש בגרסה v1 היציבה
-            is_semantic_valid = False
-            try:
-                # שימוש בפרמטר http_options כדי לקבוע את גרסת ה-API ל-v1 באופן גורף
-                client_v1 = genai.Client(
-                    api_key=gemini_api_key,
-                    http_options={'api_version': 'v1'}
-                )
-                
-                emb_response = client_v1.models.embed_content(
-                    model="text-embedding-004",  # עכשיו מודל 004 יעבוד פנתר תחת v1
-                    contents=[user_question] + candidate_texts
-                )
-                
-                embeddings = [item.values for item in emb_response.embeddings]
-                user_vector = np.array(embeddings[0])
-                chunks_vectors = np.array(embeddings[1:])
-                
-                semantic_scores = np.dot(chunks_vectors, user_vector)
-                is_semantic_valid = True
-                retrieval_status = "✅ החיפוש המשולב פועל בהצלחה! מודל ה-Embedding הגיב בגרסה היציבה."
-            except Exception as emb_err:
-                # הגנה: אם משהו בכל זאת נכשל, משתמשים בפאזי
-                semantic_scores = np.zeros(len(candidate_texts))
-                retrieval_status = f"⚠️ סמנטי הושבת עקב שגיאה: {emb_err}"
-
-            # 3. שילוב ציונים חכם
-            if is_semantic_valid:
-                # 70% סמנטי + 30% פאזי
-                combined_candidate_scores = (semantic_scores * 0.7) + (np.array(candidate_fuzzy_scores) * 0.3)
-            else:
-                combined_candidate_scores = np.array(candidate_fuzzy_scores)
-            
-            # מיון ושליפת 3 המקומות הראשונים
-            top_candidate_indices = np.argsort(combined_candidate_scores)[-3:][::-1]
-            
-            for idx, pos in enumerate(top_candidate_indices, 1):
-                chunk_text = candidate_texts[pos]
-                short_text = chunk_text[:150] + "..." if len(chunk_text) > 150 else chunk_text
-                short_text_escaped = short_text.replace('\n', '<br>')
-                
-                sem_display = f"{semantic_scores[pos]:.2f}" if is_semantic_valid else "הושבת"
-                retrieved_results_html += (
-                    f"📌 <b>תוצאה {idx}:</b><br>"
-                    f"• ציון סמנטי: {sem_display} | ציון פאזי: {candidate_fuzzy_scores[pos]:.2f}<br>"
-                    f"• ציון משולב סופי: {combined_candidate_scores[pos]:.2f}<br>"
-                    f"<code>{short_text_escaped}</code><br><br>"
-                )
-        else:
-            retrieval_status = "💡 שלח שאלה כדי לראות את האלגוריתם המשולב והחסין בפעולה."
-
-        # החזרת כל חמשת השלבים בטור
         return jsonify({
-            "response": f"🚧 <b>בדיקת שלבים טורית - שלב 5 (אכיפת API v1) באוויר!</b><br><br>"
+            "response": f"🚧 <b>בדיקת שלבים טורית - שלב אבחון המודלים באוויר!</b><br><br>"
                         f"🔑 <b>1. בדיקת מפתח סביבה:</b><br>• {api_key_status}<br><br>"
                         f"🤖 <b>2. בדיקת קריאה לג'ימיני (Flash):</b><br>• {gemini_response_status}<br><br>"
                         f"📋 <b>3. ניתוח מסמך הנהלים (Terminal.txt):</b><br>"
-                        f"• חולצו בהצלחה מפרק 2: <b>{len(chunks_chapter_2)}</b> שאלות ותשובות.<br>"
-                        f"• חולצו בהצלחה מפרק 3: <b>{len(chunks_chapter_3)}</b> דפי מערכת.<br>"
-                        f"📊 <b>סך הכל יחידות מידע מוכנות בזיכרון:</b> {total_chunks} יחידות.<br><br>"
-                        f"🧠 <b>5. מנוע RAG משולב וחסין (גרסת v1 נאכפת):</b><br>"
-                        f"• סטטוס: {retrieval_status}<br><br>"
+                        f"• חולצו בהצלחה: <b>{total_chunks}</b> יחידות מידע.<br><br>"
+                        f"🔍 <b>5. סטטוס מודלים סמנטיים בגוגל:</b><br>{retrieval_status}<br>{models_display}<br><br>"
                         f"{retrieved_results_html}"
         })
 
     except Exception as e:
-        return jsonify({"response": f"❌ שגיאה כללית במהלך הרצת השלבים: {e}"})
+        return jsonify({"response": f"❌ שגיאה כללית: {e}"})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
