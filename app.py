@@ -1,10 +1,20 @@
 from flask import Flask, render_template, request, jsonify
 import os
 import re
+import numpy as np
 from google import genai
 from rapidfuzz import fuzz
+from sentence_transformers import SentenceTransformer, util
 
 app = Flask(__name__)
+
+# טעינת מודל סמנטי קל ואיכותי שרץ מקומית על השרת (תומך רב-לשוני ומצוין לעברית)
+# המודל נטען פעם אחת בלבד עם עליית השרת
+try:
+    semantic_model = SentenceTransformer('sentence-transformers/LabSE')
+except Exception as e:
+    print(f"Error loading local semantic model: {e}")
+    semantic_model = None
 
 @app.route('/')
 def home():
@@ -67,44 +77,74 @@ def chat():
         all_chunks = chunks_chapter_2 + chunks_chapter_3
         total_chunks = len(all_chunks)
 
-        # === שלב 5 המאבחן: הדפסת המודלים הנתמכים ישירות מגוגל ===
-        available_models_list = []
-        try:
-            # קריאה לפונקציה שגוגל ביקשה שנריץ: ListModels
-            for m in client.models.list():
-                # נסנן רק מודלים שמסוגלים לעשות Embedding (מכילים את המילה embed)
-                if 'embed' in m.name.lower() or 'embedding' in m.name.lower():
-                    available_models_list.append(f"• <code>{m.name}</code> (שיטות נתמכות: {m.supported_methods})")
-            
-            models_display = "<br>".join(available_models_list) if available_models_list else "• לא נמצאו מודלי Embedding ברשימה."
-            retrieval_status = "📊 <b>סריקת המודלים של גוגל הצליחה! הנה מה שבאמת פתוח בחשבון שלך:</b>"
-        except Exception as list_err:
-            models_display = f"❌ נכשל בשליפת רשימת המודלים: {list_err}"
-            retrieval_status = "⚠️ שגיאה בסריקת המודלים."
-
-        # מציג בינתיים את התוצאות הפאזיות שעובדות מעולה כגיבוי
-        retrieved_results_html = "<h3>🤖 תוצאות חיפוש פאזי (זמני לאבחון):</h3>"
-        fuzzy_scored_chunks = []
-        for chunk in all_chunks:
-            f_score = fuzz.partial_ratio(user_question, chunk) / 100.0
-            fuzzy_scored_chunks.append((f_score, chunk))
-        fuzzy_scored_chunks.sort(key=lambda x: x[0], reverse=True)
+        # === שלב 5 הסופי: מנוע RAG משולב מקומי (חסין שגיאות רשת) ===
+        retrieval_status = ""
+        retrieved_results_html = ""
         
-        for idx, (score, chunk_text) in enumerate(fuzzy_scored_chunks[:2], 1):
-            retrieved_results_html += f"📌 <b>תוצאה {idx} (פאזי: {score:.2f}):</b><br><code>{chunk_text[:120]}...</code><br><br>"
+        if user_question:
+            # 1. חלק פאזי מקומי
+            fuzzy_scores = []
+            for chunk in all_chunks:
+                f_score = fuzz.partial_ratio(user_question, chunk) / 100.0
+                fuzzy_scores.append(f_score)
+
+            # 2. חלק סמנטי מקומי (רץ על השרת שלך - ללא פנייה לגוגל!)
+            is_semantic_valid = False
+            if semantic_model:
+                try:
+                    # יצירת וקטורים מקומית
+                    user_embedding = semantic_model.encode(user_question, convert_to_tensor=True)
+                    chunks_embeddings = semantic_model.encode(all_chunks, convert_to_tensor=True)
+                    
+                    # חישוב מרחק קוסינוס סמנטי
+                    semantic_scores_tensor = util.cos_sim(user_embedding, chunks_embeddings)[0]
+                    semantic_scores = semantic_scores_tensor.cpu().numpy()
+                    is_semantic_valid = True
+                    retrieval_status = "✅ החיפוש המשולב (סמנטי מקומי + פאזי) פועל ב-100% יציבות ללא תלות ברשת!"
+                except Exception as local_emb_err:
+                    semantic_scores = np.zeros(len(all_chunks))
+                    retrieval_status = f"⚠️ חישוב סמנטי מקומי נכשל: {local_emb_err}"
+            else:
+                semantic_scores = np.zeros(len(all_chunks))
+                retrieval_status = "⚠️ המודל הסמנטי המקומי לא נטען באתחול השרת."
+
+            # 3. שילוב הציונים (70% סמנטי מקומי + 30% פאזי)
+            if is_semantic_valid:
+                combined_scores = (semantic_scores * 0.7) + (np.array(fuzzy_scores) * 0.3)
+            else:
+                combined_scores = np.array(fuzzy_scores)
+
+            # שליפת 3 המקומות הראשונים
+            top_indices = np.argsort(combined_scores)[-3:][::-1]
+            
+            for idx, position in enumerate(top_indices, 1):
+                chunk_text = all_chunks[position]
+                short_text = chunk_text[:150] + "..." if len(chunk_text) > 150 else chunk_text
+                short_text_escaped = short_text.replace('\n', '<br>')
+                
+                sem_display = f"{semantic_scores[position]:.2f}" if is_semantic_valid else "לא זמין"
+                retrieved_results_html += (
+                    f"📌 <b>תוצאה {idx}:</b><br>"
+                    f"• ציון סמנטי מקומי: {sem_display} | ציון פאזי: {fuzzy_scores[position]:.2f}<br>"
+                    f"• ציון משולב סופי: {combined_scores[position]:.2f}<br>"
+                    f"<code>{short_text_escaped}</code><br><br>"
+                )
+        else:
+            retrieval_status = "💡 שלח שאלה כדי לראות את האלגוריתם המשולב בפעולה."
 
         return jsonify({
-            "response": f"🚧 <b>בדיקת שלבים טורית - שלב אבחון המודלים באוויר!</b><br><br>"
+            "response": f"🚧 <b>בדיקת שלבים טורית - שלב 5 (ארכיטקטורה מקומית חסינה) באוויר!</b><br><br>"
                         f"🔑 <b>1. בדיקת מפתח סביבה:</b><br>• {api_key_status}<br><br>"
                         f"🤖 <b>2. בדיקת קריאה לג'ימיני (Flash):</b><br>• {gemini_response_status}<br><br>"
                         f"📋 <b>3. ניתוח מסמך הנהלים (Terminal.txt):</b><br>"
                         f"• חולצו בהצלחה: <b>{total_chunks}</b> יחידות מידע.<br><br>"
-                        f"🔍 <b>5. סטטוס מודלים סמנטיים בגוגל:</b><br>{retrieval_status}<br>{models_display}<br><br>"
+                        f"🧠 <b>5. מנוע RAG משולב (סמנטי מקומי מנותק רשת + פאזי):</b><br>"
+                        f"• סטטוס: {retrieval_status}<br><br>"
                         f"{retrieved_results_html}"
         })
 
     except Exception as e:
-        return jsonify({"response": f"❌ שגיאה כללית: {e}"})
+        return jsonify({"response": f"❌ שגיאה כללית במהלך הרצת השלבים: {e}"})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
