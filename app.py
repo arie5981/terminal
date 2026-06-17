@@ -136,10 +136,11 @@ def chat():
 
     combined_scores = (semantic_scores * 0.7) + (np.array(fuzzy_scores) * 0.3)
     
-    top_indices = np.argsort(combined_scores)[-4:][::-1]
+    # הגדלנו ל-6 כדי להבטיח ששני סוגי ייפוי הכוח ייכנסו ל-Context יחד
+    top_indices = np.argsort(combined_scores)[-6:][::-1]
     retrieved_chunks = [CHUNKS_TEXTS[idx] for idx in top_indices]
     context = "\n\n---\n\n".join(retrieved_chunks)
-
+    
     # 🧠 פרומפט דינמי, ממוקד ונקי משבלונות - מחקה ניסוח אנושי ומקצועי
     messages = [
         {
