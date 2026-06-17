@@ -34,7 +34,7 @@ def chat():
             )
             gemini_response_status = f"✅ תגובת המודל: \"{response.text.strip()}\""
         except Exception as api_error:
-            gemini_response_status = f"❌ שגיאה בפנייה ל-Gemini: {api_error}"
+            gemini_response_status = f"❌ שגיאה בפנייה ל-Gemini (עומס זמני או שגיאה): {api_error}"
     else:
         gemini_response_status = "❌ לא בוצעה פנייה כי המפתח חסר."
 
@@ -91,29 +91,29 @@ def chat():
         all_chunks = chunks_chapter_2 + chunks_chapter_3
         total_chunks = len(all_chunks)
 
-        # === שלב 5 המתוקן: סינון פאזי מוקדם ל-30 המובילים ושליפה סמנטית חסינה ===
+        # === שלב 5 המעודכן: שימוש במודל היציב text-embedding-005 + פונקציית הגנה (Fallback) ===
         retrieval_status = ""
         retrieved_results_html = ""
         
         if user_question and gemini_api_key:
-            # 1. שלב סינון מקומי מהיר - חישוב ציון פאזי לכל 136 הצ'אנקים
+            # 1. חישוב ציון פאזי לכל 136 הצ'אנקים
             fuzzy_scored_chunks = []
             for idx, chunk in enumerate(all_chunks):
                 f_score = fuzz.partial_ratio(user_question, chunk) / 100.0
                 fuzzy_scored_chunks.append((f_score, idx, chunk))
             
-            # מיון לפי הציון הפאזי ושליפת 30 הצ'אנקים הכי מתאימים טקסטואלית
+            # מיון ושליפת 30 המועמדים המובילים פאזית
             fuzzy_scored_chunks.sort(key=lambda x: x[0], reverse=True)
-            candidate_chunks_info = fuzzy_scored_chunks[:30] # מגבילים ל-30 המועמדים הכי טובים
+            candidate_chunks_info = fuzzy_scored_chunks[:30]
             
             candidate_texts = [item[2] for item in candidate_chunks_info]
             candidate_fuzzy_scores = [item[0] for item in candidate_chunks_info]
-            candidate_original_indices = [item[1] for item in candidate_chunks_info]
 
-            # 2. שליפת הציון הסמנטי רק עבור 30 המועמדים (בטוח לחלוטין ממגבלת ה-100!)
+            # 2. פנייה למודל הסמנטי העדכני והרשמי: text-embedding-005
+            is_semantic_valid = False
             try:
                 emb_response = client.models.embed_content(
-                    model="text-embedding-004",
+                    model="text-embedding-005",  # תיקון קריטי לשם המודל הנתמך ב-v1!
                     contents=[user_question] + candidate_texts
                 )
                 
@@ -122,15 +122,22 @@ def chat():
                 chunks_vectors = np.array(embeddings[1:])
                 
                 semantic_scores = np.dot(chunks_vectors, user_vector)
-                retrieval_status = "✅ החיפוש המשולב (סמנטי + פאזי) פועל בהצלחה ועבר את מגבלת ה-Batch!"
+                is_semantic_valid = True
+                retrieval_status = "✅ החיפוש המשולב פועל בהצלחה עם מודל text-embedding-005!"
             except Exception as emb_err:
+                # הגנה: אם גוגל מחזיר שגיאה או עומס, נשתמש רק בפאזי
                 semantic_scores = np.zeros(len(candidate_texts))
-                retrieval_status = f"⚠️ החלק הסמנטי הושבת זמנית עקב: {emb_err}"
+                retrieval_status = f"⚠️ סמנטי הושבת עקב שגיאה (הופעל מנגנון הגנה פאזי): {emb_err}"
 
-            # 3. שילוב הציון הסופי עבור המועמדים (70% סמנטי + 30% פאזי)
-            combined_candidate_scores = (semantic_scores * 0.7) + (np.array(candidate_fuzzy_scores) * 0.3)
+            # 3. שילוב ציונים חכם
+            if is_semantic_valid:
+                # 70% סמנטי + 30% פאזי
+                combined_candidate_scores = (semantic_scores * 0.7) + (np.array(candidate_fuzzy_scores) * 0.3)
+            else:
+                # אם הסמנטי נכשל, הציון המשולב שווה לציון הפאזי ב-100%
+                combined_candidate_scores = np.array(candidate_fuzzy_scores)
             
-            # מיון ושליפת 3 המקומות הראשונים מתוך המועמדים
+            # מיון ושליפת 3 המקומות הראשונים
             top_candidate_indices = np.argsort(combined_candidate_scores)[-3:][::-1]
             
             for idx, pos in enumerate(top_candidate_indices, 1):
@@ -138,9 +145,10 @@ def chat():
                 short_text = chunk_text[:150] + "..." if len(chunk_text) > 150 else chunk_text
                 short_text_escaped = short_text.replace('\n', '<br>')
                 
+                sem_display = f"{semantic_scores[pos]:.2f}" if is_semantic_valid else "הושבת"
                 retrieved_results_html += (
                     f"📌 <b>תוצאה {idx}:</b><br>"
-                    f"• ציון סמנטי: {semantic_scores[pos]:.2f} | ציון פאזי: {candidate_fuzzy_scores[pos]:.2f}<br>"
+                    f"• ציון סמנטי: {sem_display} | ציון פאזי: {candidate_fuzzy_scores[pos]:.2f}<br>"
                     f"• ציון משולב סופי: {combined_candidate_scores[pos]:.2f}<br>"
                     f"<code>{short_text_escaped}</code><br><br>"
                 )
@@ -149,14 +157,14 @@ def chat():
 
         # החזרת כל חמשת השלבים בטור
         return jsonify({
-            "response": f"🚧 <b>בדיקת שלבים טורית - שלב 5 המתוקן והחסין באוויר!</b><br><br>"
+            "response": f"🚧 <b>בדיקת שלבים טורית - שלב 5 (מודל 005 מוגן) באוויר!</b><br><br>"
                         f"🔑 <b>1. בדיקת מפתח סביבה:</b><br>• {api_key_status}<br><br>"
                         f"🤖 <b>2. בדיקת קריאה לג'ימיני (Flash):</b><br>• {gemini_response_status}<br><br>"
                         f"📋 <b>3. ניתוח מסמך הנהלים (Terminal.txt):</b><br>"
                         f"• חולצו בהצלחה מפרק 2: <b>{len(chunks_chapter_2)}</b> שאלות ותשובות.<br>"
                         f"• חולצו בהצלחה מפרק 3: <b>{len(chunks_chapter_3)}</b> דפי מערכת.<br>"
                         f"📊 <b>סך הכל יחידות מידע מוכנות בזיכרון:</b> {total_chunks} יחידות.<br><br>"
-                        f"🧠 <b>5. מנוע RAG משולב וחסין (סינון פאזי מוקדם ל-30 מועמדים + סמנטי):</b><br>"
+                        f"🧠 <b>5. מנוע RAG משולב וחסין (מודל 005):</b><br>"
                         f"• סטטוס: {retrieval_status}<br><br>"
                         f"{retrieved_results_html}"
         })
