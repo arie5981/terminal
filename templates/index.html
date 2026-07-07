@@ -54,7 +54,7 @@
             padding: 20px;
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 15px;
             background-color: #ffffff;
             scroll-behavior: smooth; 
         }
@@ -73,45 +73,35 @@
             line-height: 1.6;
         }
 
-        /* 5. מבנה כללי של שורת הודעה (משותף למחשב ולנייד) */
+        /* 5. מבנה בועות הצ'אט (ברירת מחדל למחשב שולחני) */
         .message-wrapper {
             display: flex;
             width: 100%;
             max-width: 700px;
             margin: 0 auto;
         }
-        .align-user { justify-content: flex-end; }
-        .align-bot { justify-content: flex-start; }
-
-        /* הגדרת בסיס להודעה */
         .message {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 15px;
             font-size: 16px;
             line-height: 1.5;
             word-wrap: break-word;
         }
-
-        /* --- הודעת המשתמש (השאלה): תמיד בתוך בועה כחולה (מחשב ונייד) --- */
+        .bot-message {
+            background-color: #ffffff;
+            color: #333333;
+            border: 1px solid #e4e6eb;
+            border-top-right-radius: 2px;
+        }
         .user-message {
-            max-width: 85%;
-            padding: 12px 16px;
             background-color: #007bff;
             color: #ffffff;
-            border-radius: 15px;
             border-top-left-radius: 2px;
             box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
-
-        /* --- הודעת הבוט (התשובה): תמיד ללא בועה וללא הגבלת רוחב פנימית (מחשב ונייד) --- */
-        .align-bot .message {
-            max-width: 100%;
-            width: 100%;
-            padding: 0px;
-            border-radius: 0px;
-            border: none;
-            box-shadow: none;
-            background-color: transparent;
-            color: #202124;
-        }
+        .align-user { justify-content: flex-end; }
+        .align-bot { justify-content: flex-start; }
 
         /* 6. סרגל תחתון להזנת שאלה */
         .input-wrapper {
@@ -170,16 +160,47 @@
             background-color: #0056b3;
         }
 
-        /* ================= התאמות משלימות וספציפיות לניידים ================= */
+        /* ================= התאמות מוחלטות לניידים (שילוב בועה ותשובה פתוחה) ================= */
         @media (max-width: 600px) {
             .header-title { font-size: 16px; }
             .logo { height: 35px; }
             
+            /* שוליים כלליים לאזור השיחה */
             .chat-container { padding: 15px 12px; gap: 20px; }
+            
             .welcome-container { font-size: 16px; padding: 10px; width: 100%; margin: 5px 0; }
             
-            .user-message { max-width: 85% !important; padding: 10px 14px !important; }
+            /* מעטפת ההודעה מקבלת רוחב מלא ומבטלת הגבלות */
+            .message-wrapper { 
+                max-width: 100% !important; 
+                width: 100% !important;
+            }
             
+            /* --- הודעת המשתמש (השאלה) - הבועה נשמרת --- */
+            .user-message {
+                background-color: #007bff !important; /* צבע הבועה הכחול */
+                color: #ffffff !important;            /* טקסט לבן */
+                max-width: 85% !important;            /* הגבלת הבועה שלא תמתח על הכל */
+                padding: 10px 14px !important;        /* ריפוד פנימי של בועה */
+                border-radius: 15px !important;       /* פינות עגולות */
+                border-top-left-radius: 2px !important;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.1) !important;
+            }
+            
+            /* --- הודעת הבוט (התשובה) - הבועה מבוטלת לחלוטין --- */
+            .align-bot .message { 
+                max-width: 100% !important; 
+                width: 100% !important;
+                padding: 0px !important;              /* הסרת הריפוד הפנימי */
+                border-radius: 0px !important;        /* ביטול פינות עגולות */
+                border: none !important;              /* הסרת המסגרת האפורה */
+                box-shadow: none !important;          /* הסרת צלליות */
+                background-color: transparent !important; /* רקע שקוף - נטמע באתר */
+                color: #202124 !important;            /* צבע טקסט של Gemini */
+                font-size: 16px;
+            }
+            
+            /* התאמת אזור הקלט */
             .input-wrapper { padding: 10px 0; }
             .input-container { max-width: 100%; padding: 8px 12px; border-radius: 12px; }
             .chat-textarea { height: 50px; font-size: 15px; }
@@ -213,10 +234,8 @@
     </div>
 
     <script>
-        // שמירת היסטוריית חילופי הדברים לצורך הקשר בשרת
         let memoryHistory = [];
 
-        // פונקציה להתאמה דינמית של גובה תיבת הטקסט בזמן הקלדה
         function autoGrow(element) {
             const minHeight = window.innerWidth <= 600 ? 50 : 75;
             element.style.height = minHeight + "px";
@@ -225,7 +244,6 @@
             }
         }
 
-        // פונקציית שליחת ההודעה
         function sendMessage() {
             const inputElement = document.getElementById('userInput');
             const chatContainer = document.getElementById('chatContainer');
@@ -233,7 +251,7 @@
             
             if (text === '') return;
 
-            // 1. יצירת אלמנט והוספת הודעת המשתמש למסך
+            // 1. הוספת הודעת המשתמש למסך
             const wrapperUser = document.createElement('div');
             wrapperUser.className = 'message-wrapper align-user';
             const userDiv = document.createElement('div');
@@ -242,15 +260,14 @@
             wrapperUser.appendChild(userDiv);
             chatContainer.appendChild(wrapperUser);
 
-            // איפוס תיבת הטקסט לגובה המינימלי המקורי
+            // איפוס תיבת הטקסט
             const minHeight = window.innerWidth <= 600 ? 50 : 75;
             inputElement.value = '';
             inputElement.style.height = minHeight + "px";
             
-            // גלילה אוטומטית למטה
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
-            // 2. יצירת אלמנט זמני למצב "טעינה" של הבוט
+            // 2. יצירת בועת "טעינה" זמנית של הבוט
             const wrapperBot = document.createElement('div');
             wrapperBot.className = 'message-wrapper align-bot';
             const botDiv = document.createElement('div');
@@ -260,7 +277,7 @@
             chatContainer.appendChild(wrapperBot);
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
-            // 3. שליחת הבקשה לשרת הפייתון (הנתיב /chat)
+            // 3. שליחת הבקשה לשרת
             fetch('/chat', {
                 method: 'POST',
                 headers: {
@@ -273,14 +290,33 @@
             })
             .then(response => response.json())
             .then(data => {
-                // הזרקת התשובה (תומך ב-HTML שהשרת מחזיר כמו קישורים, בולטים וכו')
                 botDiv.innerHTML = data.response;
                 
-                // גלילה חלקה לראש השאלה הנוכחית כדי להקל על הקריאה
+                // גלילה חלקה לראש השאלה הנוכחית
                 setTimeout(() => {
                     wrapperUser.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }, 50);
 
-                // 4. עדכון זיכרון השיחה המקומי (שומר את 3 הזוגות האחרונים)
+                // 4. עדכון ההיסטוריה המקומית
                 memoryHistory.push({ role: "user", content: text });
                 memoryHistory.push({ role: "assistant", content: data.response });
+                if (memoryHistory.length > 6) {
+                    memoryHistory.shift();
+                    memoryHistory.shift();
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                botDiv.textContent = "מצטער, חלה שגיאה בחיבור למערכת. נסה שוב.";
+            });
+        }
+
+        document.getElementById('userInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
