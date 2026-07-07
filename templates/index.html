@@ -213,8 +213,10 @@
     </div>
 
     <script>
+        // שמירת היסטוריית חילופי הדברים לצורך הקשר בשרת
         let memoryHistory = [];
 
+        // פונקציה להתאמה דינמית של גובה תיבת הטקסט בזמן הקלדה
         function autoGrow(element) {
             const minHeight = window.innerWidth <= 600 ? 50 : 75;
             element.style.height = minHeight + "px";
@@ -223,6 +225,7 @@
             }
         }
 
+        // פונקציית שליחת ההודעה
         function sendMessage() {
             const inputElement = document.getElementById('userInput');
             const chatContainer = document.getElementById('chatContainer');
@@ -230,7 +233,7 @@
             
             if (text === '') return;
 
-            // 1. הוספת הודעת המשתמש למסך
+            // 1. יצירת אלמנט והוספת הודעת המשתמש למסך
             const wrapperUser = document.createElement('div');
             wrapperUser.className = 'message-wrapper align-user';
             const userDiv = document.createElement('div');
@@ -239,14 +242,15 @@
             wrapperUser.appendChild(userDiv);
             chatContainer.appendChild(wrapperUser);
 
-            // איפוס תיבת הטקסט
+            // איפוס תיבת הטקסט לגובה המינימלי המקורי
             const minHeight = window.innerWidth <= 600 ? 50 : 75;
             inputElement.value = '';
             inputElement.style.height = minHeight + "px";
             
+            // גלילה אוטומטית למטה
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
-            // 2. יצירת בועת "טעינה" זמנית של הבוט
+            // 2. יצירת אלמנט זמני למצב "טעינה" של הבוט
             const wrapperBot = document.createElement('div');
             wrapperBot.className = 'message-wrapper align-bot';
             const botDiv = document.createElement('div');
@@ -256,7 +260,7 @@
             chatContainer.appendChild(wrapperBot);
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
-            // 3. שליחת הבקשה לשרת
+            // 3. שליחת הבקשה לשרת הפייתון (הנתיב /chat)
             fetch('/chat', {
                 method: 'POST',
                 headers: {
@@ -269,26 +273,14 @@
             })
             .then(response => response.json())
             .then(data => {
+                // הזרקת התשובה (תומך ב-HTML שהשרת מחזיר כמו קישורים, בולטים וכו')
                 botDiv.innerHTML = data.response;
                 
-                // גלילה חלקה לראש השאלה הנוכחית
+                // גלילה חלקה לראש השאלה הנוכחית כדי להקל על הקריאה
                 setTimeout(() => {
                     wrapperUser.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }, 50);
 
-                // 4. עדכון ההיסטוריה המקומית
+                // 4. עדכון זיכרון השיחה המקומי (שומר את 3 הזוגות האחרונים)
                 memoryHistory.push({ role: "user", content: text });
                 memoryHistory.push({ role: "assistant", content: data.response });
-                if (memoryHistory.length > 6) {
-                    memoryHistory.shift();
-                    memoryHistory.shift();
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                botDiv.textContent = "מצטער, חלה שגיאה בחיבור למערכת. נסה שוב.";
-            });
-        }
-
-        document.getElementById('userInput').addEventListener('keydown', function(e) {
-            if (
