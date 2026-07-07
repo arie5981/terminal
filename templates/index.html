@@ -160,50 +160,48 @@
             background-color: #0056b3;
         }
 
-        /* ================= התאמות מוחלטות לניידים בסגנון Gemini ================= */
+        /* ================= התאמות מוחלטות לניידים (שילוב בועה ותשובה פתוחה) ================= */
         @media (max-width: 600px) {
             .header-title { font-size: 16px; }
             .logo { height: 35px; }
             
-            /* פריסת אזור הצ'אט מקצה לקצה בלי שוליים פנימיים */
-            .chat-container { padding: 15px 0px; gap: 20px; }
+            /* שוליים כלליים לאזור השיחה */
+            .chat-container { padding: 15px 12px; gap: 20px; }
             
-            .welcome-container { font-size: 16px; padding: 10px 15px; width: 100%; margin: 5px 0; }
+            .welcome-container { font-size: 16px; padding: 10px; width: 100%; margin: 5px 0; }
             
-            /* המעטפת תתפוס 100% מרוחב המסך ותבטל את יישורי הבועות (הכל מתחיל מימין) */
+            /* מעטפת ההודעה מקבלת רוחב מלא ומבטלת הגבלות */
             .message-wrapper { 
                 max-width: 100% !important; 
                 width: 100% !important;
-                padding: 0 16px !important; /* ריפוד קל רק כדי שהטקסט לא ייגע פיזית בזכוכית של המכשיר */
-                display: block !important;  /* הופך את הבלוק לרגיל כדי לבטל את ה-flex-end וה-flex-start */
             }
             
-            /* ביטול מוחלט של קופסאות הצ'אט, הפיכת הטקסט לחופשי ברוחב 100% */
-            .message { 
+            /* --- הודעת המשתמש (השאלה) - הבועה נשמרת --- */
+            .user-message {
+                background-color: #007bff !important; /* צבע הבועה הכחול */
+                color: #ffffff !important;            /* טקסט לבן */
+                max-width: 85% !important;            /* הגבלת הבועה שלא תמתח על הכל */
+                padding: 10px 14px !important;        /* ריפוד פנימי של בועה */
+                border-radius: 15px !important;       /* פינות עגולות */
+                border-top-left-radius: 2px !important;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.1) !important;
+            }
+            
+            /* --- הודעת הבוט (התשובה) - הבועה מבוטלת לחלוטין --- */
+            .align-bot .message { 
                 max-width: 100% !important; 
                 width: 100% !important;
-                padding: 0px !important;    /* הסרת המרווח הפנימי הלבן שראית בתמונה */
-                font-size: 16px;    
-                border-radius: 0px !important; 
-                border: none !important;     /* מעלים את המסגרת האפורה שחנקה את הבועה */
-                box-shadow: none !important; 
-                background-color: transparent !important; /* הרקע הופך שקוף - נשאר רק הרקע הלבן הכללי של האתר */
+                padding: 0px !important;              /* הסרת הריפוד הפנימי */
+                border-radius: 0px !important;        /* ביטול פינות עגולות */
+                border: none !important;              /* הסרת המסגרת האפורה */
+                box-shadow: none !important;          /* הסרת צלליות */
+                background-color: transparent !important; /* רקע שקוף - נטמע באתר */
+                color: #202124 !important;            /* צבע טקסט של Gemini */
+                font-size: 16px;
             }
             
-            /* טקסט הבוט (התשובה) - צבע טקסט רגיל, נקי ופרוס לכל הרוחב */
-            .bot-message {
-                color: #202124 !important;
-            }
-            
-            /* טקסט המשתמש (השאלה) - מודגש בכחול, מופרד ופרוס לכל הרוחב */
-            .user-message {
-                color: #007bff !important; 
-                font-weight: bold;
-                margin-bottom: 8px;
-            }
-            
-            /* סרגל קלט מותאם למובייל */
-            .input-wrapper { padding: 10px; }
+            /* התאמת אזור הקלט */
+            .input-wrapper { padding: 10px 0; }
             .input-container { max-width: 100%; padding: 8px 12px; border-radius: 12px; }
             .chat-textarea { height: 50px; font-size: 15px; }
             .send-button { width: 36px; height: 36px; font-size: 16px; }
@@ -262,7 +260,7 @@
             wrapperUser.appendChild(userDiv);
             chatContainer.appendChild(wrapperUser);
 
-            // איפוס תיבת הטקסט לגובה המקורי
+            // איפוס תיבת הטקסט
             const minHeight = window.innerWidth <= 600 ? 50 : 75;
             inputElement.value = '';
             inputElement.style.height = minHeight + "px";
