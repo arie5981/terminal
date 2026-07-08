@@ -8,7 +8,9 @@ app = Flask(__name__)
 
 # שליפת מפתח ה-API
 openai_api_key = os.environ.get("OPENAI_API_KEY")
-client = OpenAI(api_key=openai_api_key)
+
+# הגדרת הלקוח עם מפתח ותוספת Timeout מפורשת של 60 שניות למניעת ניתוקים בעומס
+client = OpenAI(api_key=openai_api_key, timeout=60.0)
 
 # משתנים גלובליים פשוטים
 LINKS_DICTIONARY = {}   
@@ -165,9 +167,9 @@ def chat():
     })
 
     try:
-        # שליחה למודל החזק gpt-4o שיודע לקרוא את כל הקובץ בבת אחת ולענות ללא טעויות
+        # פנייה למודל gpt-4o-mini המהיר והיציב ביותר לעבודה ב-Full-Context
         response = client.chat.completions.create(
-            model="gpt-4o",  # מומלץ מאוד להשאיר gpt-4o. אם רוצים לחסוך עוד, אפשר לשנות ל-gpt-4o-mini
+            model="gpt-4o-mini", 
             messages=messages,
             temperature=0.0  
         )
