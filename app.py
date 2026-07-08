@@ -1,7 +1,6 @@
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, render_template, request, jsonify
 import os
 import re
-import json
 from google import genai
 from google.genai import types
 import markdown 
@@ -89,46 +88,6 @@ def inject_hyperlinks(text):
 def home():
     return render_template('index.html')
 
-def generate_stream_response_content(formatted_contents, system_instruction):
-    """פונקציה לייצור התגובה בצורת Stream של JSON (לעצירת הספינר)"""
-    full_raw_answer = ""
-    
-    try:
-        # התחלת הזרמה בלייב של התשובה
-        response_stream = client.models.generate_content_stream(
-            model='gemini-2.5-flash',
-            contents=formatted_contents,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.0
-            )
-        )
-        
-        # הדפדפן מזהה מיד שזה התחיל לעבוד ומפסיק לסובב את הלשונית
-        for chunk in response_stream:
-            # איסוף של הטוקן הבא
-            chunk_text = chunk.text
-            if chunk_text:
-                full_raw_answer += chunk_text
-                # שליחת חתיכת JSON קטנה עם הטוקן לדפדפן
-                yield f"data: {json.dumps({'token': chunk_text})}\n\n"
-        
-        # סיימנו את התגובה הגולמית
-        # המרה תקנית של Markdown ל-HTML של תשובת ה-AI הסופית
-        html_answer = markdown.markdown(full_raw_answer, extensions=['nl2br'])
-        
-        # השתלת הקישורים על גבי ה-HTML הסופי
-        final_answer = inject_hyperlinks(html_answer)
-        
-        # שליחת חתיכת JSON סופית עם כל ה-HTML הנקי
-        yield f"data: {json.dumps({'final': final_answer})}\n\n"
-
-    except Exception as e:
-        print(f"❌ Error calling Gemini API in stream: {e}")
-        error_msg = "מצטער, נתקלתי בשגיאה בתקשורת עם שרת ה-AI של גוגל. אנא נסה שוב."
-        yield f"data: {json.dumps({'error': error_msg})}\n\n"
-
-
 @app.route('/chat', methods=['POST'])
 def chat():
     data = request.json or {}
@@ -146,12 +105,11 @@ def chat():
     
     for msg in chat_history:
         role = msg.get("role")
-        # המרת שמות ה-Roles מסטנדרט OpenAI לסטנדרט Gemini
         gemini_role = "user" if role == "user" else "model"
         
-        # התעלמות מהודעות היסטוריה ריקות
         content_text = clean_html_for_history(msg.get("content", ""))
-        if not content_text: continue
+        if not content_text: 
+            continue
 
         formatted_contents.append(
             types.Content(
@@ -168,7 +126,7 @@ def chat():
         )
     )
 
-    # --- 2. הבניית הנחיות המערכת (System Instruction) ---
+    # --- 2. הבניית הנחיות המערכת (System Instruction) המאוחדות עם כל ה-Terminal בפנים ---
     system_instruction = (
         "אתה עוזר דיגיטלי מקצועי, שירותי, ענייני ומדויק לחלוטין של אתר מייצגים בגביה של הביטוח הלאומי.\n"
         "תפקידך להנדס את המידע מתוך קובץ הנהלים המלא שמצורף לך למטה, ולנסח תשובה נקייה, אסתטית, מרווחת, וללא מילים מיותרות או פרשנות עצמית.\n\n"
@@ -213,10 +171,12 @@ def chat():
         "- עליך לוודא שכל שם של טופס, אתר, מערכת או כתובת מייל שמופיעים בטקסט, עטופים בדיוק בסוגריים מרובעים כפי שהם מופיעים בנהלים (לדוגמה: [אתר שירות אישי], [addmy@nioi.gov.il]). אל תשמיט ואל תשנה את הסוגריים המרובעים האלו בתוך חלקי המידע."
     )
 
-    # --- 3. הזרמת תשובה בדפדפן (לעצירת הספינר בלשונית) ---
-    # ה-Response מחזיר גנרטור (Stream של JSON) במקום JSON אחד סופי
-    return Response(generate_stream_response_content(formatted_contents, system_instruction), content_type='text/event-stream')
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+    try:
+        # פנייה רגילה למודל ג'מיני 2.5 החדש והמהיר למניעת Timeouts
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=formatted_contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.0
+            )
