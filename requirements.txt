@@ -7,3 +7,4 @@ openai
 tiktoken
 rapidfuzz
 markdown
+google-genai
