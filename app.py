@@ -190,7 +190,7 @@ def chat():
     combined_scores = (semantic_scores * 0.7) + (np.array(fuzzy_scores) * 0.3)
     
     # שליפת 3 האינדקסים המובילים בלבד (מונע ערבוב מידע ומסנן רעשים)
-    top_indices = np.argsort(combined_scores)[-3:][::-1]
+    top_indices = np.argsort(combined_scores)[-4:][::-1]
     
     context_elements = []
     for rank, idx in enumerate(top_indices, 1):
