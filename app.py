@@ -192,8 +192,8 @@ def chat():
 
     combined_scores = (semantic_scores * 0.7) + (np.array(fuzzy_scores) * 0.3)
     
-    # שליפת 6 האינדקסים המובילים
-    top_indices = np.argsort(combined_scores)[-6:][::-1]
+    # שליפת 3 האינדקסים המובילים
+    top_indices = np.argsort(combined_scores)[-3:][::-1]
     
     context_elements = []
     for rank, idx in enumerate(top_indices, 1):
