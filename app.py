@@ -168,7 +168,7 @@ def chat():
     try:
         # פנייה למודל gpt-4o-mini המהיר והיציב ביותר לעבודה ב-Full-Context
         response = client.chat.completions.create(
-            model="gpt-4o", 
+            model="gpt-4o-mini", 
             messages=messages,
             temperature=0.0  
         )
