@@ -31,7 +31,7 @@ SYSTEM_INSTRUCTION = (
     "2. התחל את השלב הראשון ישירות מהפעולה המעשית הראשונה בתוך האתר (לדוגמה: 'באתר מייצגים, לחץ על...', 'בתחתית הדף, לחץ על...').\n\n"
     "✨ חוק הדגשה והבלטה:\n"
     "1. חובה להדגיש באמצעות כוכביות כפולות (לדוגמה: **שלב 1: גישה לרשימת דיווחים**) את כל כותרות השלבים, כותרות האפשרויות, או כותרות הסיכום.\n"
-    "2. חובה להדגיש מונחי מפתח תפעוליים חשובים בתוך הטקסט (כמו שמות של כפתורים עליהם צריך ללחוץ, סטטוסים של טפסים כגון **'שלח טופס'**, או אזהרות כמו **שים לב:**).\n\n"
+    "2. חובה להדגיש מונחי מפתח תפעולייםחשובים בתוך הטקסט (כמו שמות של כפתורים עליהם צריך ללחוץ, סטטוסים של טפסים כגון **'שלח טופס'**, או אזהרות כמו **שים לב:**).\n\n"
     "🧱 חוקי מבנה וארכיטקטורה דינמית:\n"
     "1. חוק הפרדת מסכים ומקורות: אם המידע בתשובה מבוסס על יותר מדף אחד בנהלים, חל איסור מוחלט לאחד אותם לרצף שלבים אחד! עליך לפצל את התשובה באופן ברור ומובחן באמצעות כותרות ראשיות המציינות את שם המסך או הנושא של אותו דף.\n"
     "2. אבחנה מוחלטת בין שלבים לאפשרויות:\n"
@@ -95,20 +95,25 @@ def load_terminal_data_directly():
 load_terminal_data_directly()
 
 def get_or_create_context_cache(client):
-    """מנהל את יצירת או שליפת ה-Context Cache מול השרתים של גוגל"""
+    """מנהל את יצירת או שליפת ה-Context Cache ומוודא שהסטטוס שלו ACTIVE"""
     global CACHE_NAME
     
     if CACHE_NAME:
         try:
             existing_cache = client.caches.get(name=CACHE_NAME)
-            return existing_cache
+            # שיפור קריטי: בודקים שהסטטוס של הקאש הוא אכן סוים ופעיל בגוגל ולא CREATING או פג תוקף
+            if hasattr(existing_cache, 'state') and str(existing_cache.state) != "STATE_ACTIVE" and str(existing_cache.state) != "ACTIVE":
+                print(f"🔄 ה-Cache קיים אך בסטטוס לא פעיל ({existing_cache.state}), מייצר מחדש...")
+                CACHE_NAME = None
+            else:
+                return existing_cache
         except Exception:
-            print("🔄 ה-Cache פג תוקף בגוגל, מייצר אחד חדש...")
+            print("🔄 ה-Cache לא נמצא או פג תוקף בגוגל, מייצר אחד חדש...")
             CACHE_NAME = None
 
     print("🚀 מייצר Context Cache חדש בשרתי גוגל...")
     
-    # בניית התוכן המלא לקאש: גם חוקי המערכת וגם קובץ הקונטקסט ננעלים פה ביחד!
+    # בניית התוכן המלא לקאש
     full_cache_text = (
         f"{SYSTEM_INSTRUCTION}\n\n"
         f"=== קובץ הנהלים הרשמי והמלא (CONTEXT) ===\n{TERMINAL_CONTENT}\n=========================================\n"
@@ -186,7 +191,7 @@ def chat():
         # שליפת הקאש או יצירתו
         cache_content = get_or_create_context_cache(client)
 
-        # פנייה למודל: ה-cached_content מועבר, ה-system_instruction הוסר מכאן לחלוטין!
+        # פנייה למודל
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=formatted_contents,
@@ -203,6 +208,7 @@ def chat():
         return jsonify({"response": final_answer})
 
     except Exception as e:
+        # קוד ה-Debug המצוין נשאר פה באופן קבוע כדי להציג שגיאות על המסך במקום תקיעה
         error_message = f"🚨 שגיאת תקשורת מול גוגל: {str(e)}"
         print(f"❌ Error calling Gemini API: {e}")
         return jsonify({"response": error_message})
