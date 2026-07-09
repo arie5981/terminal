@@ -18,7 +18,7 @@ CACHE_NAME = None  # ישמור את המזהה הייחודי של ה-Cache ב�
 # הנחיות המערכת הקבועות (חוקי הניסוח וההתנהגות)
 SYSTEM_INSTRUCTION = (
     "אתה עוזר דיגיטלי מקצועי, שירותי, ענייני ומדויק לחלוטין של אתר מייצגים בגביה של הביטוח הלאומי.\n"
-    "תפקידך להנדס את המידע מתוך קובץ הנהלים המלא שמצורף לך ב-Context, ולנסח תשובה נקייה, אסתטית, מרווחת, וללא מילים מיותרות או פרשנות עצמית.\n\n"
+    "תפקידך להנדס את המידע מתוך קובץ הנהלים המלא שמצורף לך למטה, ולנסח תשובה נקייה, אסתטית, מרווחת, וללא מילים מיותרות או פרשנות עצמית.\n\n"
     "⛔ חוק איסור פרשנות והמצאת עובדות (קריטי ומעל הכל):\n"
     "1. מצא את דף המייצגים הרלוונטי לשאלת המשתמש מתוך קובץ הנהלים המלא.\n"
     "2. אם אין נוהל ביטול אקטיבי (כמו כפתור ביטול), חל איסור מוחלט להמציא כפתורים כגון 'ביטול עיקול' או שלבי ביצוע שלא כתובים במפורש!\n"
@@ -108,13 +108,16 @@ def get_or_create_context_cache(client):
 
     print("🚀 מייצר Context Cache חדש בשרתי גוגל...")
     
-    # ה-Context Cache מכיל רק את קובץ הנהלים הגדול כחלק מהתוכן השמור
-    cache_text = f"=== קובץ הנהלים הרשמי והמלא (CONTEXT) ===\n{TERMINAL_CONTENT}\n=========================================\n"
+    # בניית התוכן המלא לקאש: גם חוקי המערכת וגם קובץ הקונטקסט ננעלים פה ביחד!
+    full_cache_text = (
+        f"{SYSTEM_INSTRUCTION}\n\n"
+        f"=== קובץ הנהלים הרשמי והמלא (CONTEXT) ===\n{TERMINAL_CONTENT}\n=========================================\n"
+    )
     
     cache = client.caches.create(
         model='gemini-2.5-flash',
         config=types.CreateCachedContentConfig(
-            contents=[types.Content(role="user", parts=[types.Part.from_text(text=cache_text)])],
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=full_cache_text)])],
             ttl="86400s"  # שמירה ל-24 שעות
         )
     )
@@ -183,13 +186,12 @@ def chat():
         # שליפת הקאש או יצירתו
         cache_content = get_or_create_context_cache(client)
 
-        # פנייה למודל: משלבים את ה-Cache יחד עם ה-system_instruction בנפרד
+        # פנייה למודל: ה-cached_content מועבר, ה-system_instruction הוסר מכאן לחלוטין!
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=formatted_contents,
             config=types.GenerateContentConfig(
                 cached_content=cache_content.name,
-                system_instruction=SYSTEM_INSTRUCTION,
                 temperature=0.0
             )
         )
@@ -201,7 +203,6 @@ def chat():
         return jsonify({"response": final_answer})
 
     except Exception as e:
-        # הזרקת השגיאה האמיתית של גוגל ישירות למסך של המשתמש לצורך אבחון מהיר ללא טרמינל
         error_message = f"🚨 שגיאת תקשורת מול גוגל: {str(e)}"
         print(f"❌ Error calling Gemini API: {e}")
         return jsonify({"response": error_message})
