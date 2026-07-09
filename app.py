@@ -113,7 +113,7 @@ def get_or_create_context_cache(client):
         model='gemini-2.5-flash',
         config=types.CreateCachedContentConfig(
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=system_instruction)])],
-            ttl="86400s"  # אורך חיים של 24 שעות (הזמן מתחדש אוטומטית בכל פנייה שמנצלת את הקאש)
+            ttl="86400s"  # שמירה ל-24 שעות (מתחדש בכל קריאה)
         )
     )
     CACHE_NAME = cache.name
@@ -161,3 +161,46 @@ def chat():
 
         formatted_contents.append(
             types.Content(
+                role=gemini_role,
+                parts=[types.Part.from_text(text=content_text)]
+            )
+        )
+
+    # הוספת השאלה הנוכחית של המשתמש
+    formatted_contents.append(
+        types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=f"השאלה הנוכחית של המשתמש: {user_question}")]
+        )
+    )
+
+    try:
+        # אתחול ה-Client מחדש בכל בקשה למניעת ניתוקי רשת
+        client = genai.Client(api_key=gemini_api_key)
+        
+        # שליפת הקאש או יצירתו
+        cache_content = get_or_create_context_cache(client)
+
+        # פנייה למודל באמצעות ה-Cache
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=formatted_contents,
+            config=types.GenerateContentConfig(
+                cached_content=cache_content.name,  # שימוש ב-Cache בלבד
+                temperature=0.0
+            )
+        )
+        
+        raw_answer = response.text
+        html_answer = markdown.markdown(raw_answer, extensions=['nl2br'])
+        final_answer = inject_hyperlinks(html_answer)
+        
+        return jsonify({"response": final_answer})
+
+    except Exception as e:
+        print(f"❌ Error calling Gemini API: {e}")
+        return jsonify({"response": "מצטער, נתקלתי בשגיאה בתקשורת עם שרת ה-AI. אנא נסה שוב."})
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
