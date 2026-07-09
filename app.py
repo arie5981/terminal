@@ -106,7 +106,7 @@ def get_or_create_context_cache(client):
             print("🔄 ה-Cache פג תוקף בגוגל, מייצר אחד חדש...")
             CACHE_NAME = None
 
-    print("🚀 מייצר Context Cache חדש בשרתי גוגל עם ה-Terminal Content...")
+    print("🚀 מייצר Context Cache חדש בשרתי גוגל...")
     
     # ה-Context Cache מכיל רק את קובץ הנהלים הגדול כחלק מהתוכן השמור
     cache_text = f"=== קובץ הנהלים הרשמי והמלא (CONTEXT) ===\n{TERMINAL_CONTENT}\n=========================================\n"
@@ -189,7 +189,7 @@ def chat():
             contents=formatted_contents,
             config=types.GenerateContentConfig(
                 cached_content=cache_content.name,
-                system_instruction=SYSTEM_INSTRUCTION, # מוזרק כאן בצורה תקינה
+                system_instruction=SYSTEM_INSTRUCTION,
                 temperature=0.0
             )
         )
@@ -201,8 +201,10 @@ def chat():
         return jsonify({"response": final_answer})
 
     except Exception as e:
+        # הזרקת השגיאה האמיתית של גוגל ישירות למסך של המשתמש לצורך אבחון מהיר ללא טרמינל
+        error_message = f"🚨 שגיאת תקשורת מול גוגל: {str(e)}"
         print(f"❌ Error calling Gemini API: {e}")
-        return jsonify({"response": "מצטער, נתקלתי בשגיאה בתקשורת עם שרת ה-AI. אנא נסה שוב."})
+        return jsonify({"response": error_message})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
