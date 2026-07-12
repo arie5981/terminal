@@ -115,19 +115,30 @@ def get_or_create_context_cache(client):
     return cache
 
 def inject_hyperlinks(text):
-    """השתלת קישורים על גבי ה-HTML הסופי (רק עבור קישורים אמיתיים מהמילון)"""
+    """
+    סורק את התשובה ומחליף סוגריים מרובעים:
+    - אם הערך הוא מספר טלפון: משתיל אותו כטקסט נקי בלבד (בלי קישור!).
+    - אם הערך הוא מייל או אתר: משתיל אותו כקישור לחיץ.
+    """
     if not text:
         return ""
     for name, url in LINKS_DICTIONARY.items():
         placeholder = f"[{name}]"
         if placeholder in text:
-            if "@" in url and not url.startswith("http"):
-                href_target = f"mailto:{url}"
+            # 1. בדיקה אם מדובר במספר טלפון (מכיל רק מספרים ומקפים)
+            if re.match(r'^[\d\-]+$', url):
+                # מחליפים את הסוגריים המרובעים ישירות במספר הטלפון כטקסט פשוט!
+                text = text.replace(placeholder, url)
+            
+            # 2. בדיקה אם מדובר בכתובת מייל
+            elif "@" in url and not url.startswith("http"):
+                hyperlink = f'<a href="mailto:{url}" style="color: #007bff; text-decoration: underline; font-weight: bold;">{name}</a>'
+                text = text.replace(placeholder, hyperlink)
+            
+            # 3. כל מקרה אחר נחשב כקישור אינטרנט רגיל
             else:
-                href_target = url
-                
-            hyperlink = f'<a href="{href_target}" style="color: #007bff; text-decoration: underline; font-weight: bold;" target="_blank">{name}</a>'
-            text = text.replace(placeholder, hyperlink)
+                hyperlink = f'<a href="{url}" style="color: #007bff; text-decoration: underline; font-weight: bold;" target="_blank">{name}</a>'
+                text = text.replace(placeholder, hyperlink)
     return text
     
 @app.route('/')
