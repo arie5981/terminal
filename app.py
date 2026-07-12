@@ -115,14 +115,19 @@ def get_or_create_context_cache(client):
     return cache
 
 def inject_hyperlinks(text):
-    """השתלת קישורים על גבי ה-HTML הסופי"""
+    """השתלת קישורים, מיילים ומספרי טלפון על גבי ה-HTML הסופי בצורה דינמית"""
     if not text:
         return ""
     for name, url in LINKS_DICTIONARY.items():
         placeholder = f"[{name}]"
         if placeholder in text:
+            # 1. בדיקה אם מדובר בכתובת מייל
             if "@" in url and not url.startswith("http"):
                 href_target = f"mailto:{url}"
+            # 2. בדיקה אם מדובר במספר טלפון (מכיל רק מספרים ומקפים)
+            elif re.match(r'^[\d\-]+$', url):
+                href_target = f"tel:{url}"
+            # 3. כל מקרה אחר נחשב כקישור אינטרנט רגיל
             else:
                 href_target = url
                 
