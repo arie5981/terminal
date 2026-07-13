@@ -116,28 +116,37 @@ def get_or_create_context_cache(client):
 def inject_hyperlinks(text):
     """
     סורק את התשובה ומחליף סוגריים מרובעים:
-    - אם הערך הוא מספר טלפון: משתיל אותו כטקסט נקי בלבד (בלי קישור!).
-    - אם הערך הוא מייל או אתר: משתיל אותו כקישור לחיץ.
+    - אם זה טלפון: מנקה רווחים, שם מקף, ומציג כטקסט נקי בלבד.
+    - אם זה אתר או מייל: מציג כקישור כחול.
     """
     if not text:
         return ""
+        
     for name, url in LINKS_DICTIONARY.items():
         placeholder = f"[{name}]"
         if placeholder in text:
-            # 1. בדיקה אם מדובר במספר טלפון (מכיל רק מספרים ומקפים)
-            if re.match(r'^[\d\-]+$', url):
-                # מחליפים את הסוגריים המרובעים ישירות במספר הטלפון כטקסט פשוט!
-                text = text.replace(placeholder, url)
             
-            # 2. בדיקה אם מדובר בכתובת מייל
-            elif "@" in url and not url.startswith("http"):
+            # בדיקה אם הערך בטרמינל הוא טלפון (מכיל רק מספרים, רווחים או מקפים)
+            if re.match(r'^[\d\s\-]+$', url):
+                # חילוץ כל הספרות והרכבת המספר מחדש עם מקף בדיוק כמו שאתה רוצה!
+                numbers = re.findall(r'\d+', url)
+                if len(numbers) >= 2:
+                    clean_phone = f"{numbers[0]}-{numbers[1]}" # יהפוך את "02 6709970" ל-"02-6709970"
+                    text = text.replace(placeholder, clean_phone)
+                else:
+                    text = text.replace(placeholder, url)
+                continue
+            
+            # טיפול בכתובת מייל
+            if "@" in url and not url.startswith("http"):
                 hyperlink = f'<a href="mailto:{url}" style="color: #007bff; text-decoration: underline; font-weight: bold;">{name}</a>'
                 text = text.replace(placeholder, hyperlink)
             
-            # 3. כל מקרה אחר נחשב כקישור אינטרנט רגיל
+            # קישור אינטרנט רגיל
             else:
                 hyperlink = f'<a href="{url}" style="color: #007bff; text-decoration: underline; font-weight: bold;" target="_blank">{name}</a>'
                 text = text.replace(placeholder, hyperlink)
+                
     return text
     
 @app.route('/')
