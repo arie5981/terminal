@@ -1,38 +1,35 @@
 import os
 import json
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template, render_template_string
 
 app = Flask(__name__)
 
 # --- משתנה הדיבאג הגלובלי ---
-DEBUG_MODE = 1  # 0 = כבוי (רגיל), 1 = מצב דיבאג פעיל
+DEBUG_MODE = 1  # 0 = כבוי (מערכת רגילה), 1 = מצב דיבאג פעיל
 
 # הגדרת נתיבים לתיקיית הדאטה ולקבצים
 DATA_DIR = "data"
 QUESTIONS_FILE = os.path.join(DATA_DIR, "questions.txt")
 REMARKS_FILE = os.path.join(DATA_DIR, "remarks.txt")
 
-# יצירת תיקיית data באופן אוטומטי אם אינה קיימת
+# יצירת תיקיית data באופן אוטומטי בשרת אם אינה קיימת
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
+# 1. נתיב דף הבית (הצגת ממשק הצ'אט)
 @app.route('/', methods=['GET'])
 def home():
-    try:
-        # קריאת קובץ index.html שנמצא בתיקייה הראשית והצגתו
-        with open("index.html", "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        return "קובץ index.html לא נמצא בשרת.", 404
+    return render_template('index.html')
 
+# 2. נתיב ה-Chat המרכזי שיוצר קשר עם ג'מיני
 @app.route('/chat', methods=['POST'])
 def chat():
     data = request.json
     user_question = data.get('question', '').strip()
     history = data.get('history', [])
 
-    # 1. רישום השאלה בתיקיית data אם אנחנו במצב דיבאג
+    # רישום השאלה בתוך data/questions.txt אם הדיבאג פעיל
     if DEBUG_MODE == 1 and user_question:
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -41,10 +38,10 @@ def chat():
         except Exception as e:
             print(f"Error writing to questions.txt: {e}")
 
-    # --- כאן הלוגיקה הקיימת שלך שמחוללת את התשובה מג'מיני ---
+    # --- כאן מתבצעת הלוגיקה הקיימת שלך מול Gemini שמחזירה את התשובה ---
     # נניח שהמשתנה שמכיל את תשובת ה-HTML הסופית נקרא bot_response
     bot_response = "זוהי תשובת דוגמה מהנוהל.<br>1. שלב ראשון.<br>2. שלב שני." 
-    # -------------------------------------------------------------
+    # -----------------------------------------------------------------
 
     return jsonify({
         'response': bot_response,
@@ -52,9 +49,9 @@ def chat():
         'original_question': user_question
     })
 
+# 3. נתיב לקבלת הערת הדיבאג מהחלון הקופץ ושמירתה בפורמט JSONL
 @app.route('/save_remark', methods=['POST'])
 def save_remark():
-    """נתיב לשמירת הערות המשתמש במצב דיבאג בתוך תיקיית data"""
     if DEBUG_MODE != 1:
         return jsonify({"status": "error", "message": "Debug mode is off"}), 403
         
@@ -76,9 +73,9 @@ def save_remark():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# 4. נתיב דף ריכוז ההערות (הטבלה המעוצבת) באתר
 @app.route('/remarks', methods=['GET'])
 def show_remarks():
-    """דף תצוגת ההערות שנאספו"""
     remarks_list = []
     
     if os.path.exists(REMARKS_FILE):
@@ -94,7 +91,7 @@ def show_remarks():
     remarks_list.reverse()
     return render_template_string(REMARKS_HTML_TEMPLATE, remarks=remarks_list)
 
-# --- תבנית ה-HTML לעמוד ה-Remarks ---
+# --- תבנית ה-HTML הייעודית לעמוד ה-Remarks ---
 REMARKS_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -171,6 +168,6 @@ REMARKS_HTML_TEMPLATE = """
 """
 
 if __name__ == '__main__':
-    # Fly.io מעביר את הפורט כמשתנה סביבה, אם הוא לא קיים נשתמש ב-8080 כברירת מחדל
+    # התאמה מלאה לפורטים ולסביבה של Fly.io
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=True)
