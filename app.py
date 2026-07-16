@@ -17,7 +17,7 @@ REMARKS_FILE = os.path.join(DATA_DIR, "remarks.txt")
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
-# 1. נתיב דף הבית (הצגת ממשק הצ'אט)
+# 1. נתיב דף הבית (הצגת ממשק הצ'אט מתוך תיקיית templates)
 @app.route('/', methods=['GET'])
 def home():
     return render_template('index.html')
