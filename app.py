@@ -17,6 +17,15 @@ REMARKS_FILE = os.path.join(DATA_DIR, "remarks.txt")
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
+@app.route('/', methods=['GET'])
+def home():
+    try:
+        # קריאת קובץ index.html שנמצא בתיקייה הראשית והצגתו
+        with open("index.html", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "קובץ index.html לא נמצא בשרת.", 404
+
 @app.route('/chat', methods=['POST'])
 def chat():
     data = request.json
