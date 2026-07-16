@@ -162,4 +162,6 @@ REMARKS_HTML_TEMPLATE = """
 """
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Fly.io מעביר את הפורט כמשתנה סביבה, אם הוא לא קיים נשתמש ב-8080 כברירת מחדל
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
