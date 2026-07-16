@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>צ'אט תמיכה למייצגים</title>
     <style>
-        /* 1. הגדרות תשתית ומסך מלא - רקע לבן */
         * {
             box-sizing: border-box;
             margin: 0;
@@ -19,8 +18,6 @@
             flex-direction: column;
             overflow: hidden;
         }
-
-        /* 2. סרגל עליון - כחול ממלכתי עם טקסט לבן */
         .header {
             background-color: #1e3a8a; 
             height: 60px;
@@ -46,8 +43,6 @@
             width: auto;
             object-fit: contain;
         }
-
-        /* 3. אזור השיחה המרכזי */
         .chat-container {
             flex: 1;
             overflow-y: auto;
@@ -58,8 +53,6 @@
             background-color: #ffffff;
             scroll-behavior: smooth; 
         }
-
-        /* 4. הודעת פתיחה */
         .welcome-container {
             background-color: #ffffff; 
             color: #33b5e5; 
@@ -72,8 +65,6 @@
             width: 90%;
             line-height: 1.6;
         }
-
-        /* 5. מבנה בועות הצ'אט */
         .message-wrapper {
             display: flex;
             width: 100%;
@@ -85,8 +76,6 @@
             line-height: 1.5;
             word-wrap: break-word;
         }
-        
-        /* הודעת המשתמש */
         .user-message {
             max-width: 85%;
             padding: 12px 16px;
@@ -96,8 +85,6 @@
             border-top-left-radius: 2px;
             box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
-
-        /* הודעת הבוט */
         .bot-message {
             max-width: 100% !important;
             width: 100% !important;
@@ -108,8 +95,6 @@
             background-color: transparent !important;
             color: #202124;
         }
-
-        /* מניעת חיתוך מספרים ובולטים ברשימות של הבוט */
         .bot-message ul, .bot-message ol {
             padding-right: 25px !important;
             margin-top: 5px;
@@ -118,8 +103,6 @@
         .bot-message li {
             margin-bottom: 4px;
         }
-
-        /* כפתור הערות דיבאג */
         .debug-remark-btn {
             background-color: #f0f4f9;
             color: #1a73e8;
@@ -128,7 +111,6 @@
             padding: 5px 12px;
             font-size: 13px;
             cursor: pointer;
-            margin-top: 10px;
             display: inline-flex;
             align-items: center;
             gap: 4px;
@@ -138,16 +120,8 @@
         .debug-remark-btn:hover {
             background-color: #e8f0fe;
         }
-
-        details summary {
-            display: list-item;
-            list-style-position: inside;
-        }
-
         .align-user { justify-content: flex-end; }
         .align-bot { justify-content: flex-start; }
-
-        /* 6. סרגל תחתון להזנת שאלה */
         .input-wrapper {
             background-color: #ffffff;
             border-top: 1px solid #e4e6eb;
@@ -196,8 +170,6 @@
             flex-shrink: 0;
             margin-bottom: 4px;
         }
-
-        /* התאמות לניידים */
         @media (max-width: 600px) {
             .header-title { font-size: 16px; }
             .logo { height: 35px; }
@@ -273,7 +245,6 @@
             
             if (text === '') return;
 
-            // 1. הוספת הודעת המשתמש
             const wrapperUser = document.createElement('div');
             wrapperUser.className = 'message-wrapper align-user';
             const userDiv = document.createElement('div');
@@ -282,13 +253,11 @@
             wrapperUser.appendChild(userDiv);
             chatContainer.appendChild(wrapperUser);
 
-            // איפוס תיבת הטקסט
             const minHeight = window.innerWidth <= 600 ? 50 : 75;
             inputElement.value = '';
             inputElement.style.height = minHeight + "px";
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
-            // 2. בועת טעינה
             const wrapperBot = document.createElement('div');
             wrapperBot.className = 'message-wrapper align-bot';
             const botDiv = document.createElement('div');
@@ -298,7 +267,6 @@
             chatContainer.appendChild(wrapperBot);
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
-            // 3. שליחה לשרת
             fetch('/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -308,15 +276,21 @@
             .then(data => {
                 botDiv.innerHTML = data.response;
                 
-                // אם המערכת בדיבאג, נוסיף את כפתור ההערות בתחתית התשובה
+                // --- מנגנון הזרקת הכפתור בשורה נפרדת מתחת לתשובה ---
                 if (data.debug === 1) {
+                    const btnWrapper = document.createElement('div');
+                    btnWrapper.style.width = '100%';
+                    btnWrapper.style.marginTop = '12px'; 
+                    
                     const remarkBtn = document.createElement('button');
                     remarkBtn.className = 'debug-remark-btn';
                     remarkBtn.innerHTML = '📝 הערות';
                     remarkBtn.onclick = function() {
                         openRemarkModal(data.original_question, data.response);
                     };
-                    botDiv.appendChild(remarkBtn);
+                    
+                    btnWrapper.appendChild(remarkBtn);
+                    botDiv.appendChild(btnWrapper);
                 }
 
                 setTimeout(() => {
