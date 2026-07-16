@@ -70,6 +70,7 @@
             width: 100%;
             max-width: 700px;
             margin: 0 auto;
+            flex-direction: column; /* מסדר את הכפתורים ישירות מתחת להודעה */
         }
         .message {
             font-size: 16px;
@@ -84,6 +85,7 @@
             color: #ffffff;
             border-top-left-radius: 2px;
             box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            align-self: flex-end;
         }
         .bot-message {
             max-width: 100% !important;
@@ -94,6 +96,7 @@
             box-shadow: none !important;
             background-color: transparent !important;
             color: #202124;
+            align-self: flex-start;
         }
         .bot-message ul, .bot-message ol {
             padding-right: 25px !important;
@@ -102,6 +105,12 @@
         }
         .bot-message li {
             margin-bottom: 4px;
+        }
+        .btn-container-wrapper {
+            width: 100%;
+            margin-top: 10px;
+            display: flex;
+            justify-content: flex-start;
         }
         .debug-remark-btn {
             background-color: #f0f4f9;
@@ -120,8 +129,8 @@
         .debug-remark-btn:hover {
             background-color: #e8f0fe;
         }
-        .align-user { justify-content: flex-end; }
-        .align-bot { justify-content: flex-start; }
+        .align-user { align-items: flex-end; }
+        .align-bot { align-items: flex-start; }
         .input-wrapper {
             background-color: #ffffff;
             border-top: 1px solid #e4e6eb;
@@ -276,11 +285,10 @@
             .then(data => {
                 botDiv.innerHTML = data.response;
                 
-                // --- מנגנון הזרקת הכפתור בשורה נפרדת מתחת לתשובה ---
+                // --- הבטחה שכפתור ההערות יופיע מתחת לתשובה בשורה נפרדת לחלוטין ---
                 if (data.debug === 1) {
                     const btnWrapper = document.createElement('div');
-                    btnWrapper.style.width = '100%';
-                    btnWrapper.style.marginTop = '12px'; 
+                    btnWrapper.className = 'btn-container-wrapper';
                     
                     const remarkBtn = document.createElement('button');
                     remarkBtn.className = 'debug-remark-btn';
@@ -290,7 +298,7 @@
                     };
                     
                     btnWrapper.appendChild(remarkBtn);
-                    botDiv.appendChild(btnWrapper);
+                    wrapperBot.appendChild(btnWrapper); // מוצמד למטה למעטפת הבוט הכללית
                 }
 
                 setTimeout(() => {
