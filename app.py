@@ -3,6 +3,8 @@ import os
 import re
 import time
 import json
+import base64
+import requests
 from datetime import datetime
 from google import genai
 from google.genai import types
@@ -13,18 +15,18 @@ app = Flask(__name__)
 # --- משתנה הדיבאג הגלובלי ---
 DEBUG_MODE = 1  # 0 = כבוי (מערכת רגילה), 1 = מצב דיבאג פעיל
 
-# שליפת מפתח ה-API של ג'מיני
+# שליפת מפתחות API ומשתני סביבה
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GITHUB_REPO = os.environ.get("GITHUB_REPO")  # פורמט דוגמה: "username/my-repo-name"
 
 # משתנים גלובליים לנתונים
 LINKS_DICTIONARY = {}   
 TERMINAL_CONTENT = ""   
 CACHE_NAME = None  # ישמור את המזהה הייחודי של ה-Cache בשרתי גוגל
 
-# הגדרת נתיבים לתיקיית הדאטה ולקבצים
+# הגדרת נתיבים לתיקיית הדאטה ולקבצים (משמש לטעינה ראשונית בלבד)
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
-QUESTIONS_FILE = os.path.join(DATA_DIR, "questions.txt")
-REMARKS_FILE = os.path.join(DATA_DIR, "remarks.txt")
 CACHE_INFO_FILE = os.path.join(DATA_DIR, "cache_info.json")
 
 # יצירת תיקיית data באופן אוטומטי בשרת אם אינה קיימת
@@ -61,6 +63,76 @@ def clean_html_for_history(text):
     clean = re.compile('<.*?>')
     return re.sub(clean, '', text).strip()
 
+def append_line_to_github_file(repo_filepath, new_line_content):
+    """פונקציית עזר שמוסיפה שורה חדשה לקובץ ישירות בתוך ה-Repository ב-GitHub"""
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        print("🚨 חסרים פרטי הזדהות של GITHUB_TOKEN או GITHUB_REPO בשרת.")
+        return False
+        
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{repo_filepath}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    try:
+        # 1. ניסיון לקרוא את הקובץ הקיים כדי לקבל את ה-sha שלו ואת התוכן הנוכחי
+        res = requests.get(url, headers=headers)
+        current_content = ""
+        sha = None
+        
+        if res.status_code == 200:
+            file_data = res.json()
+            sha = file_data.get("sha")
+            # פיענוח מ-base64
+            current_content = base64.b64decode(file_data.get("content")).decode("utf-8")
+        elif res.status_code != 404:
+            print(f"⚠️ שגיאה במשיכת קובץ מ-GitHub (סטטוס {res.status_code})")
+            return False
+
+        # 2. הרכבת התוכן החדש (הוספת השורה החדשה בסוף)
+        if current_content and not current_content.endswith("\n"):
+            current_content += "\n"
+        updated_content = current_content + new_line_content
+
+        # 3. דחיפת הקובץ המעודכן בחזרה ל-GitHub
+        payload = {
+            "message": f"🤖 מערכת דיבאג: עדכון אוטומטי של {repo_filepath}",
+            "content": base64.b64encode(updated_content.encode("utf-8")).decode("utf-8")
+        }
+        if sha:
+            payload["sha"] = sha
+            
+        put_res = requests.put(url, headers=headers, json=payload)
+        if put_res.status_code in [200, 201]:
+            print(f"✅ הקובץ {repo_filepath} עודכן בהצלחה ב-GitHub.")
+            return True
+        else:
+            print(f"🚨 שגיאה בכתיבה ל-GitHub: {put_res.text}")
+            return False
+            
+    except Exception as e:
+        print(f"🚨 שגיאה חריגה בתקשורת מול GitHub API: {e}")
+        return False
+
+def read_all_lines_from_github_file(repo_filepath):
+    """קורא את כל התוכן של קובץ מתוך GitHub (עבור עמוד ה-Remarks)"""
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return ""
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{repo_filepath}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    try:
+        res = requests.get(url, headers=headers)
+        if res.status_code == 200:
+            file_data = res.json()
+            return base64.b64decode(file_data.get("content")).decode("utf-8")
+    except Exception as e:
+        print(f"Error reading from GitHub: {e}")
+    return ""
+
 def load_terminal_data_directly():
     """טעינת הקישורים מתוך קובץ info.txt בנפרד, וטעינת הנהלים מתוך Terminal.txt"""
     global LINKS_DICTIONARY, TERMINAL_CONTENT
@@ -95,7 +167,7 @@ def load_terminal_data_directly():
 load_terminal_data_directly()
 
 def get_or_create_context_cache(client):
-    """מנהל את יצירת או שליפת ה-Context Cache לטווח של שעה ושומר מזהה פיזית לקובץ"""
+    """מנהל את יצירת או שליפת ה-Context Cache לטווח של שעה"""
     global CACHE_NAME
     
     if not CACHE_NAME and os.path.exists(CACHE_INFO_FILE):
@@ -182,17 +254,7 @@ def chat():
     if not TERMINAL_CONTENT:
         return jsonify({"response": "מערכת הנתונים של הטרמינל אינה טעונה בשרת."})
 
-    if DEBUG_MODE == 1 and user_question:
-        try:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            with open(QUESTIONS_FILE, "a", encoding="utf-8") as f:
-                f.write(f"[{timestamp}] {user_question}\n")
-        except Exception as e:
-            print(f"Error writing to questions.txt: {e}")
-
-    # --- מנגנון הגבלת היסטוריה (Sliding Window) ---
-    # ההיסטוריה מגיעה כמערך של הודעות. כל סבב מורכב מהודעת משתמש והודעת מודל (2 הודעות).
-    # כדי לשמור בדיוק את 5 השאלות והתשובות האחרונות, נחתוך את 10 האלמנטים האחרונים במערך.
+    # מנגנון הגבלת היסטוריה (Sliding Window)
     trimmed_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
 
     formatted_contents = []
@@ -248,13 +310,31 @@ def chat():
             final_answer = inject_hyperlinks(html_answer)
             
             # שליפת מטא-דטה של טוקנים מתוך התשובה הרשמית של גוגל
-            usage_info = {}
+            p_tokens = 0
+            c_tokens = 0
+            o_tokens = 0
+            
             if response.usage_metadata:
-                usage_info = {
-                    "prompt_tokens": response.usage_metadata.prompt_token_count,
-                    "cached_tokens": response.usage_metadata.cached_content_token_count,
-                    "output_tokens": response.usage_metadata.candidates_token_count
-                }
+                p_tokens = response.usage_metadata.prompt_token_count
+                c_tokens = response.usage_metadata.cached_content_token_count
+                o_tokens = response.usage_metadata.candidates_token_count
+            
+            usage_info = {
+                "prompt_tokens": p_tokens,
+                "cached_tokens": c_tokens,
+                "output_tokens": o_tokens
+            }
+
+            # --- שמירת השאלה ונתוני הטוקנים ישירות ל-GitHub במצב דיבאג ---
+            if DEBUG_MODE == 1:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # עיצוב השורה המבוקשת: [זמן] שאלה, קלט: X, מתוך ה-Cache: Y, פלט: Z
+                log_entry = (
+                    f"[{timestamp}] השאלה: {user_question} | "
+                    f"קלט: {p_tokens}, מתוך ה-Cache: {c_tokens}, פלט: {o_tokens}\n"
+                )
+                # כתיבה ל-GitHub במקום לדיסק המקומי שנמחק
+                append_line_to_github_file("data/questions.txt", log_entry)
             
             return jsonify({
                 "response": final_answer,
@@ -298,8 +378,11 @@ def save_remark():
             "response": data.get("response", "").strip()
         }
 
-        with open(REMARKS_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(remark_entry, ensure_ascii=False) + "\n")
+        # הפיכת רשומת ה-JSON לשורה בודדת מוצפנת טקסט
+        remark_line = json.dumps(remark_entry, ensure_ascii=False) + "\n"
+        
+        # שמירה ישירות ל-GitHub
+        append_line_to_github_file("data/remarks.txt", remark_line)
 
         return jsonify({"status": "success", "message": "ההערה נשמרה בהצלחה"})
     except Exception as e:
@@ -308,19 +391,21 @@ def save_remark():
 @app.route('/remarks', methods=['GET'])
 def show_remarks():
     remarks_list = []
-    if os.path.exists(REMARKS_FILE):
-        try:
-            with open(REMARKS_FILE, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        remarks_list.append(json.loads(line.strip()))
-        except Exception as e:
-            print(f"Error reading remarks file: {e}")
+    # קריאת כל התוכן ישירות מהקובץ שנמצא ב-GitHub
+    github_content = read_all_lines_from_github_file("data/remarks.txt")
+    
+    if github_content:
+        for line in github_content.splitlines():
+            if line.strip():
+                try:
+                    remarks_list.append(json.loads(line.strip()))
+                except Exception:
+                    continue
             
     remarks_list.reverse()
     return render_template_string(REMARKS_HTML_TEMPLATE, remarks=remarks_list)
 
-# --- תבנית ה-HTML לעמוד ה-Remarks (תוקן תג ה-for) ---
+# --- תבנית ה-HTML לעמוד ה-Remarks ---
 REMARKS_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
