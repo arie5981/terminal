@@ -18,7 +18,9 @@ DEBUG_MODE = 1  # 0 = כבוי (מערכת רגילה), 1 = מצב דיבאג פ
 # שליפת מפתחות API ומשתני סביבה
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-GITHUB_REPO = os.environ.get("GITHUB_REPO")  # פורמט דוגמה: "username/my-repo-name"
+
+# הגדרה ישירה של ה-Repository שלך (חוסך שימוש בטרמינל או ב-Secrets נוספים)
+GITHUB_REPO = "arie5981/terminal"
 
 # משתנים גלובליים לנתונים
 LINKS_DICTIONARY = {}   
@@ -76,7 +78,7 @@ def append_line_to_github_file(repo_filepath, new_line_content):
     }
     
     try:
-        # 1. ניסיון לקרוא את הקובץ הקיים
+        # 1. ניסיון לקרוא את הקובץ הקיים כדי לקבל את ה-sha שלו ואת התוכן הנוכחי
         res = requests.get(url, headers=headers)
         current_content = ""
         sha = None
@@ -86,15 +88,12 @@ def append_line_to_github_file(repo_filepath, new_line_content):
             sha = file_data.get("sha")
             current_content = base64.b64decode(file_data.get("content")).decode("utf-8")
         elif res.status_code == 404:
-            print(f"⚠️ הקובץ {repo_filepath} לא נמצא ב-GitHub! ודא שהוא קיים ב-Repository.")
-            # אם הקובץ לא קיים, ה-API של גוגל דורש יצירה שלו ללא SHA. 
-            # נמשיך הלאה כדי לנסות לייצר אותו בפעם הראשונה.
-            pass
+            print(f"⚠️ הקובץ {repo_filepath} לא נמצא ב-GitHub. ננסה ליצור אותו.")
         else:
             print(f"⚠️ שגיאה במשיכת קובץ מ-GitHub (סטטוס {res.status_code}): {res.text}")
             return False
 
-        # 2. הרכבת התוכן החדש
+        # 2. הרכבת התוכן החדש (הוספת השורה החדשה בסוף)
         if current_content and not current_content.endswith("\n"):
             current_content += "\n"
         updated_content = current_content + new_line_content
@@ -141,10 +140,6 @@ def load_terminal_data_directly():
     """טעינת הקישורים מתוך קובץ info.txt בנפרד, וטעינת הנהלים מתוך Terminal.txt"""
     global LINKS_DICTIONARY, TERMINAL_CONTENT
     
-    if not gemini_api_key:
-        print("🚨 חסר מפתח API של Gemini.")
-        return
-        
     # 1. טעינת קובץ המידע והקישורים ( info.txt )
     info_path = os.path.join(DATA_DIR, 'info.txt')
     if os.path.exists(info_path):
@@ -332,12 +327,12 @@ def chat():
             # --- שמירת השאלה ונתוני הטוקנים ישירות ל-GitHub במצב דיבאג ---
             if DEBUG_MODE == 1:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                # עיצוב השורה המבוקשת: [זמן] שאלה, קלט: X, מתוך ה-Cache: Y, פלט: Z
+                # עיצוב השורה המבוקשת
                 log_entry = (
                     f"[{timestamp}] השאלה: {user_question} | "
                     f"קלט: {p_tokens}, מתוך ה-Cache: {c_tokens}, פלט: {o_tokens}\n"
                 )
-                # כתיבה ל-GitHub במקום לדיסק המקומי שנמחק
+                # כתיבה ל-GitHub
                 append_line_to_github_file("data/questions.txt", log_entry)
             
             return jsonify({
