@@ -25,12 +25,13 @@ CACHE_NAME = None  # ישמור את המזהה הייחודי של ה-Cache ב�
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 QUESTIONS_FILE = os.path.join(DATA_DIR, "questions.txt")
 REMARKS_FILE = os.path.join(DATA_DIR, "remarks.txt")
+CACHE_INFO_FILE = os.path.join(DATA_DIR, "cache_info.json")
 
 # יצירת תיקיית data באופן אוטומטי בשרת אם אינה קיימת
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
-# הנחיות המערכת הקבועות - מעודכנות לתשובות אנושיות, מנומסות אך ממוקדות
+# הנחיות המערכת הקבועות
 SYSTEM_INSTRUCTION = (
     "אתה עוזר דיגיטלי מקצועי, אדיב, ענייני וממוקד של אתר מייצגים בגביה של הביטוח הלאומי.\n"
     "תפקידך לענות בצורה ישירה וברורה על השאלה שנשאלת, מתוך הסתמכות מלאה על קובץ הנהלים המצורף למטה.\n\n"
@@ -94,8 +95,17 @@ def load_terminal_data_directly():
 load_terminal_data_directly()
 
 def get_or_create_context_cache(client):
-    """מנהל את יצירת או שליפת ה-Context Cache ומוודא שהסטטוס שלו ACTIVE בשרתי גוגל"""
+    """מנהל את יצירת או שליפת ה-Context Cache לטווח של שעה ושומר מזהה פיזית לקובץ"""
     global CACHE_NAME
+    
+    if not CACHE_NAME and os.path.exists(CACHE_INFO_FILE):
+        try:
+            with open(CACHE_INFO_FILE, "r", encoding="utf-8") as f:
+                saved_data = json.load(f)
+                CACHE_NAME = saved_data.get("cache_name")
+                print(f"📂 נטען מזהה Cache מהקובץ המקומי: {CACHE_NAME}")
+        except Exception as e:
+            print(f"⚠️ שגיאה בקריאת קובץ cache_info.json: {e}")
     
     if CACHE_NAME:
         try:
@@ -104,12 +114,13 @@ def get_or_create_context_cache(client):
                 print(f"🔄 ה-Cache קיים אך בסטטוס לא פעיל ({existing_cache.state}), מייצר מחדש...")
                 CACHE_NAME = None
             else:
+                print("🎯 נמצא Cache פעיל ותקין בשרת גוגל. משתמשים בו.")
                 return existing_cache
         except Exception:
-            print("🔄 ה-Cache לא נמצא או פג תוקף בגוגל, מייצר אחד חדש...")
+            print("🔄 ה-Cache לא נמצא בגוגל או שפג תוקפו החוזי (שעה אחת), מייצר אחד חדש...")
             CACHE_NAME = None
 
-    print("🚀 מייצר Context Cache חדש בשרתי גוגל (מבוסס Terminal.txt נקי)...")
+    print("🚀 מייצר Context Cache חדש לטווח קצר בשרתי גוגל (שעה אחת)...")
     
     full_cache_text = (
         f"{SYSTEM_INSTRUCTION}\n\n"
@@ -120,10 +131,18 @@ def get_or_create_context_cache(client):
         model='gemini-2.5-flash',
         config=types.CreateCachedContentConfig(
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=full_cache_text)])],
-            ttl="86400s"  # שמירה ל-24 שעות
+            ttl="3600s"  # שמירה לשעה אחת בלבד למניעת זליגת עלויות
         )
     )
     CACHE_NAME = cache.name
+    
+    try:
+        with open(CACHE_INFO_FILE, "w", encoding="utf-8") as f:
+            json.dump({"cache_name": CACHE_NAME, "created_at": time.time()}, f)
+        print("💾 מזהה ה-Cache החדש נשמר בהצלחה בקובץ הפיזי.")
+    except Exception as e:
+        print(f"⚠️ שגיאה בשמירת מזהה ה-Cache לקובץ: {e}")
+        
     return cache
 
 def inject_hyperlinks(text):
@@ -163,7 +182,6 @@ def chat():
     if not TERMINAL_CONTENT:
         return jsonify({"response": "מערכת הנתונים של הטרמינל אינה טעונה בשרת."})
 
-    # רישום השאלה בתוך data/questions.txt אם הדיבאג פעיל
     if DEBUG_MODE == 1 and user_question:
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -172,7 +190,6 @@ def chat():
         except Exception as e:
             print(f"Error writing to questions.txt: {e}")
 
-    # בניית היסטוריית השיחה עבור ג'מיני
     formatted_contents = []
     for msg in chat_history:
         if not msg:
@@ -191,7 +208,6 @@ def chat():
             )
         )
 
-    # הוספת השאלה הנוכחית
     formatted_contents.append(
         types.Content(
             role="user",
@@ -226,11 +242,20 @@ def chat():
             html_answer = markdown.markdown(raw_answer, extensions=['nl2br'])
             final_answer = inject_hyperlinks(html_answer)
             
-            # מחזירים את התשובה האמיתית מג'מיני יחד עם פרמטרי הדיבאג
+            # שליפת מטא-דטה של טוקנים מתוך התשובה הרשמית של גוגל
+            usage_info = {}
+            if response.usage_metadata:
+                usage_info = {
+                    "prompt_tokens": response.usage_metadata.prompt_token_count,
+                    "cached_tokens": response.usage_metadata.cached_content_token_count,
+                    "output_tokens": response.usage_metadata.candidates_token_count
+                }
+            
             return jsonify({
                 "response": final_answer,
                 "debug": DEBUG_MODE,
-                "original_question": user_question
+                "original_question": user_question,
+                "usage": usage_info
             })
 
         except Exception as e:
@@ -253,7 +278,6 @@ def chat():
                 "original_question": user_question
             })
 
-# 3. נתיב לקבלת הערת הדיבאג מהחלון הקופץ ושמירתה
 @app.route('/save_remark', methods=['POST'])
 def save_remark():
     if DEBUG_MODE != 1:
@@ -276,7 +300,6 @@ def save_remark():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# 4. נתיב דף ריכוז ההערות (הטבלה)
 @app.route('/remarks', methods=['GET'])
 def show_remarks():
     remarks_list = []
@@ -292,7 +315,7 @@ def show_remarks():
     remarks_list.reverse()
     return render_template_string(REMARKS_HTML_TEMPLATE, remarks=remarks_list)
 
-# --- תבנית ה-HTML הייעודית לעמוד ה-Remarks ---
+# --- תבנית ה-HTML לעמוד ה-Remarks ---
 REMARKS_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -340,7 +363,7 @@ REMARKS_HTML_TEMPLATE = """
                 </tr>
             </thead>
             <tbody>
-                {% for r in remarks %}
+                {% append r in remarks %}
                 <tr>
                     <td data-label="זמן ומעיר">
                         <div class="timestamp">{{ r.timestamp }}</div>
