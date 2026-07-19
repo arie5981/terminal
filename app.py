@@ -190,8 +190,13 @@ def chat():
         except Exception as e:
             print(f"Error writing to questions.txt: {e}")
 
+    # --- מנגנון הגבלת היסטוריה (Sliding Window) ---
+    # ההיסטוריה מגיעה כמערך של הודעות. כל סבב מורכב מהודעת משתמש והודעת מודל (2 הודעות).
+    # כדי לשמור בדיוק את 5 השאלות והתשובות האחרונות, נחתוך את 10 האלמנטים האחרונים במערך.
+    trimmed_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
+
     formatted_contents = []
-    for msg in chat_history:
+    for msg in trimmed_history:
         if not msg:
             continue
         role = msg.get("role")
@@ -315,7 +320,7 @@ def show_remarks():
     remarks_list.reverse()
     return render_template_string(REMARKS_HTML_TEMPLATE, remarks=remarks_list)
 
-# --- תבנית ה-HTML לעמוד ה-Remarks ---
+# --- תבנית ה-HTML לעמוד ה-Remarks (תוקן תג ה-for) ---
 REMARKS_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -363,7 +368,7 @@ REMARKS_HTML_TEMPLATE = """
                 </tr>
             </thead>
             <tbody>
-                {% append r in remarks %}
+                {% for r in remarks %}
                 <tr>
                     <td data-label="זמן ומעיר">
                         <div class="timestamp">{{ r.timestamp }}</div>
