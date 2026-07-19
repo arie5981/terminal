@@ -70,7 +70,7 @@
             width: 100%;
             max-width: 700px;
             margin: 0 auto;
-            flex-direction: column; /* מסדר את הכפתורים ישירות מתחת להודעה */
+            flex-direction: column;
         }
         .message {
             font-size: 16px;
@@ -111,6 +111,8 @@
             margin-top: 10px;
             display: flex;
             justify-content: flex-start;
+            align-items: center;
+            gap: 12px;
         }
         .debug-remark-btn {
             background-color: #f0f4f9;
@@ -128,6 +130,16 @@
         }
         .debug-remark-btn:hover {
             background-color: #e8f0fe;
+        }
+        .token-usage-badge {
+            font-size: 11px;
+            color: #5f6368;
+            background-color: #f1f3f4;
+            padding: 4px 8px;
+            border-radius: 4px;
+            display: inline-flex;
+            gap: 8px;
+            direction: rtl;
         }
         .align-user { align-items: flex-end; }
         .align-bot { align-items: flex-start; }
@@ -191,6 +203,7 @@
             .input-container { max-width: 100%; padding: 8px 12px; border-radius: 12px; }
             .chat-textarea { height: 50px; font-size: 15px; }
             .send-button { width: 36px; height: 36px; font-size: 16px; }
+            .btn-container-wrapper { flex-direction: column; align-items: flex-start; gap: 6px; }
         }
     </style>
 </head>
@@ -285,20 +298,36 @@
             .then(data => {
                 botDiv.innerHTML = data.response;
                 
-                // --- הבטחה שכפתור ההערות יופיע מתחת לתשובה בשורה נפרדת לחלוטין ---
+                // יצירת קונטיינר לכפתור ולנתוני השימוש
+                const btnWrapper = document.createElement('div');
+                btnWrapper.className = 'btn-container-wrapper';
+                
+                // הוספת כפתור הערות במידה ודיבאג פעיל
                 if (data.debug === 1) {
-                    const btnWrapper = document.createElement('div');
-                    btnWrapper.className = 'btn-container-wrapper';
-                    
                     const remarkBtn = document.createElement('button');
                     remarkBtn.className = 'debug-remark-btn';
                     remarkBtn.innerHTML = '📝 הערות';
                     remarkBtn.onclick = function() {
                         openRemarkModal(data.original_question, data.response);
                     };
-                    
                     btnWrapper.appendChild(remarkBtn);
-                    wrapperBot.appendChild(btnWrapper); // מוצמד למטה למעטפת הבוט הכללית
+                }
+
+                // הזרקה חזותית של ה-Usage Metadata (נתוני השימוש)
+                if (data.usage && Object.keys(data.usage).length > 0) {
+                    const usageBadge = document.createElement('div');
+                    usageBadge.className = 'token-usage-badge';
+                    usageBadge.innerHTML = `
+                        <span><strong>קלט:</strong> ${data.usage.prompt_tokens}</span>
+                        <span><strong>מתוך ה-Cache:</strong> ${data.usage.cached_tokens}</span>
+                        <span><strong>פלט:</strong> ${data.usage.output_tokens}</span>
+                    `;
+                    btnWrapper.appendChild(usageBadge);
+                }
+                
+                // חיבור של הכל למעטפת ההודעה של הבוט
+                if (btnWrapper.children.length > 0) {
+                    wrapperBot.appendChild(btnWrapper);
                 }
 
                 setTimeout(() => {
