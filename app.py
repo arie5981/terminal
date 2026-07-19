@@ -76,7 +76,7 @@ def append_line_to_github_file(repo_filepath, new_line_content):
     }
     
     try:
-        # 1. ניסיון לקרוא את הקובץ הקיים כדי לקבל את ה-sha שלו ואת התוכן הנוכחי
+        # 1. ניסיון לקרוא את הקובץ הקיים
         res = requests.get(url, headers=headers)
         current_content = ""
         sha = None
@@ -84,13 +84,17 @@ def append_line_to_github_file(repo_filepath, new_line_content):
         if res.status_code == 200:
             file_data = res.json()
             sha = file_data.get("sha")
-            # פיענוח מ-base64
             current_content = base64.b64decode(file_data.get("content")).decode("utf-8")
-        elif res.status_code != 404:
-            print(f"⚠️ שגיאה במשיכת קובץ מ-GitHub (סטטוס {res.status_code})")
+        elif res.status_code == 404:
+            print(f"⚠️ הקובץ {repo_filepath} לא נמצא ב-GitHub! ודא שהוא קיים ב-Repository.")
+            # אם הקובץ לא קיים, ה-API של גוגל דורש יצירה שלו ללא SHA. 
+            # נמשיך הלאה כדי לנסות לייצר אותו בפעם הראשונה.
+            pass
+        else:
+            print(f"⚠️ שגיאה במשיכת קובץ מ-GitHub (סטטוס {res.status_code}): {res.text}")
             return False
 
-        # 2. הרכבת התוכן החדש (הוספת השורה החדשה בסוף)
+        # 2. הרכבת התוכן החדש
         if current_content and not current_content.endswith("\n"):
             current_content += "\n"
         updated_content = current_content + new_line_content
@@ -108,7 +112,7 @@ def append_line_to_github_file(repo_filepath, new_line_content):
             print(f"✅ הקובץ {repo_filepath} עודכן בהצלחה ב-GitHub.")
             return True
         else:
-            print(f"🚨 שגיאה בכתיבה ל-GitHub: {put_res.text}")
+            print(f"🚨 שגיאה בכתיבה ל-GitHub (סטטוס {put_res.status_code}): {put_res.text}")
             return False
             
     except Exception as e:
