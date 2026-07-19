@@ -12,9 +12,6 @@ import markdown
 
 app = Flask(__name__)
 
-# --- משתנה הדיבאג הגלובלי ---
-DEBUG_MODE = 1  # 0 = כבוי (מערכת רגילה), 1 = מצב דיבאג פעיל
-
 # שליפת מפתחות API ומשתני סביבה
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
@@ -55,6 +52,41 @@ SYSTEM_INSTRUCTION = (
     "🔗 חוקי קישורים וסוגריים מרובעים:\n"
     "- ודא שכל שם של טופס, אתר, מערכת, מוקד או כתובת מייל שמופיעים בטקסט, עטופים בדיוק בסוגריים מרובעים כפי שהם מופיעים בנהלים."
 )
+
+def get_debug_mode():
+    """קורא את מצב הדיבאג הנוכחי ישירות מתוך קובץ debug.txt ב-GitHub"""
+    content = read_all_lines_from_github_file("data/debug.txt")
+    if content and content.strip() in ["1", "0"]:
+        return int(content.strip())
+    return 0  # ברירת מחדל במקרה של שגיאה או קובץ ריק
+
+def write_debug_mode_to_github(mode_value):
+    """מעדכן את מצב הדיבאג בתוך קובץ debug.txt ב-GitHub על ידי דריסה מלאה"""
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return False
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/data/debug.txt"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    try:
+        res = requests.get(url, headers=headers)
+        sha = None
+        if res.status_code == 200:
+            sha = res.json().get("sha")
+            
+        payload = {
+            "message": f"🤖 מערכת דיבאג: עדכון סטטוס ל-{mode_value}",
+            "content": base64.b64encode(str(mode_value).encode("utf-8")).decode("utf-8")
+        }
+        if sha:
+            payload["sha"] = sha
+            
+        put_res = requests.put(url, headers=headers, json=payload)
+        return put_res.status_code in [200, 201]
+    except Exception as e:
+        print(f"🚨 שגיאה בעדכון קובץ debug.txt: {e}")
+        return False
 
 def clean_html_for_history(text):
     """מנקה תגיות HTML מהיסטוריית השיחה בצורה בטוחה ומנועת קריסות"""
@@ -104,12 +136,7 @@ def append_line_to_github_file(repo_filepath, new_line_content):
             payload["sha"] = sha
             
         put_res = requests.put(url, headers=headers, json=payload)
-        if put_res.status_code in [200, 201]:
-            print(f"✅ הקובץ {repo_filepath} עודכן בהצלחה ב-GitHub.")
-            return True
-        else:
-            print(f"🚨 שגיאה בכתיבה ל-GitHub (סטטוס {put_res.status_code}): {put_res.text}")
-            return False
+        return put_res.status_code in [200, 201]
             
     except Exception as e:
         print(f"🚨 שגיאה חריגה בתקשורת מול GitHub API: {e}")
@@ -144,14 +171,12 @@ def load_terminal_data_directly():
         link_matches = re.findall(r'>>([^:]+):\s*([^\s<<]+)<<', info_content)
         for name, url in link_matches:
             LINKS_DICTIONARY[name.strip()] = url.strip()
-        print(f"✅ Loaded {len(LINKS_DICTIONARY)} links/phones from info.txt")
 
     terminal_path = os.path.join(DATA_DIR, 'Terminal.txt')
     if os.path.exists(terminal_path):
         with open(terminal_path, 'r', encoding='utf-8') as f:
             content = f.read()
         TERMINAL_CONTENT = content.replace('\r\n', '\n').replace('\r', '\n')
-        print("✅ Loaded Terminal.txt content for Gemini.")
 
 load_terminal_data_directly()
 
@@ -164,8 +189,8 @@ def get_or_create_context_cache(client):
             with open(CACHE_INFO_FILE, "r", encoding="utf-8") as f:
                 saved_data = json.load(f)
                 CACHE_NAME = saved_data.get("cache_name")
-        except Exception as e:
-            print(f"⚠️ שגיאה בקריאת קובץ cache_info.json: {e}")
+        except Exception:
+            pass
     
     if CACHE_NAME:
         try:
@@ -194,8 +219,8 @@ def get_or_create_context_cache(client):
     try:
         with open(CACHE_INFO_FILE, "w", encoding="utf-8") as f:
             json.dump({"cache_name": CACHE_NAME, "created_at": time.time()}, f)
-    except Exception as e:
-        print(f"⚠️ שגיאה בשמירת מזהה ה-Cache לקובץ: {e}")
+    except Exception:
+        pass
         
     return cache
 
@@ -235,6 +260,9 @@ def chat():
 
     if not TERMINAL_CONTENT:
         return jsonify({"response": "מערכת הנתונים של הטרמינל אינה טעונה בשרת."})
+
+    # קריאת הסטטוס העדכני מ-GitHub
+    current_debug_mode = get_debug_mode()
 
     trimmed_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
 
@@ -302,7 +330,7 @@ def chat():
                 "output_tokens": o_tokens
             }
 
-            if DEBUG_MODE == 1:
+            if current_debug_mode == 1:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 log_entry = (
                     f"[{timestamp}] השאלה: {user_question} | "
@@ -312,9 +340,9 @@ def chat():
             
             return jsonify({
                 "response": final_answer,
-                "debug": DEBUG_MODE,
+                "debug": current_debug_mode,
                 "original_question": user_question,
-                "usage": usage_info
+                "usage": usage_info if current_debug_mode == 1 else {}
             })
 
         except Exception as e:
@@ -324,18 +352,17 @@ def chat():
                     time.sleep(retry_delay * (attempt + 1))
                     continue
             
-            friendly_message = (
-                "העוזר הדיגיטלי חווה כרגע עומס רגעי זמני בשרתי גוגל. אנא נסה שנית."
-            )
+            friendly_message = "העוזר הדיגיטלי חווה כרגע עומס רגעי זמני בשרתי גוגל. אנא נסה שנית."
             return jsonify({
                 "response": friendly_message,
-                "debug": DEBUG_MODE,
+                "debug": current_debug_mode,
                 "original_question": user_question
             })
 
 @app.route('/save_remark', methods=['POST'])
 def save_remark():
-    if DEBUG_MODE != 1:
+    current_debug_mode = get_debug_mode()
+    if current_debug_mode != 1:
         return jsonify({"status": "error", "message": "Debug mode is off"}), 403
         
     try:
@@ -355,8 +382,24 @@ def save_remark():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/update_debug_toggle', methods=['POST'])
+def update_debug_toggle():
+    """ראוט חדש שמקבל בקשה לשינוי מצב הדיבאג וכותב אותה ל-GitHub"""
+    data = request.json or {}
+    new_mode = data.get("debug_mode")
+    if new_mode not in [0, 1]:
+        return jsonify({"status": "error", "message": "ערך לא תקין"}), 400
+        
+    success = write_debug_mode_to_github(new_mode)
+    if success:
+        return jsonify({"status": "success", "message": f"מצב דיבאג עודכן ל-{new_mode} בהצלחה"})
+    else:
+        return jsonify({"status": "error", "message": "שגיאה בעדכון הקובץ ב-GitHub"}), 500
+
 @app.route('/remarks', methods=['GET'])
 def show_remarks():
+    current_debug_mode = get_debug_mode()
+
     # 1. קריאת הערות (remarks.txt)
     remarks_list = []
     github_remarks = read_all_lines_from_github_file("data/remarks.txt")
@@ -381,17 +424,18 @@ def show_remarks():
     return render_template_string(
         REMARKS_HTML_TEMPLATE, 
         remarks=remarks_list, 
-        questions=questions_list
+        questions=questions_list,
+        current_debug_mode=current_debug_mode
     )
 
-# --- תבנית ה-HTML לעמוד ה-Remarks המורחב עם לשוניות ---
+# --- תבנית ה-HTML לעמוד ה-Remarks המורחב עם 3 לשוניות ---
 REMARKS_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ניהול ומעקב דיבאג - מייצגים</title>
+    <title>מרכז בקרה ודיבאג - מייצגים</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; color: #333; }
         .container { max-width: 1300px; margin: 0 auto; }
@@ -417,10 +461,18 @@ REMARKS_HTML_TEMPLATE = """
         .box-content { max-height: 200px; overflow-y: auto; background-color: #f8f9fa; padding: 8px; border-radius: 4px; font-size: 13px; white-space: pre-line; }
         .no-remarks { text-align: center; padding: 40px; color: #666; font-size: 16px; }
         
-        /* יומן שאלות פשוט */
+        /* יומן שאלות */
         .questions-list { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 15px; }
         .question-item { padding: 12px; border-bottom: 1px solid #e4e6eb; font-family: monospace; font-size: 14px; direction: ltr; text-align: left; }
         .question-item:last-child { border-bottom: none; }
+
+        /* לשונית הגדרות דיבאג */
+        .debug-card { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 25px; max-width: 500px; }
+        .status-indicator { font-size: 18px; font-weight: bold; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+        .status-active { color: #2f9e44; }
+        .status-inactive { color: #e03131; }
+        .btn-toggle { background-color: #1e3a8a; color: white; border: none; padding: 12px 24px; font-size: 15px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: background-color 0.2s; }
+        .btn-toggle:hover { background-color: #1d4ed8; }
     </style>
 </head>
 <body>
@@ -429,7 +481,8 @@ REMARKS_HTML_TEMPLATE = """
     
     <div class="tabs">
         <button class="tab-button active" onclick="switchTab('remarks-tab')">💬 הערות ופידבק משתמשים</button>
-        <button class="tab-button" onclick="switchTab('questions-tab')">📊 יומן שאלות וטוקנים (questions.txt)</button>
+        <button class="tab-button" onclick="switchTab('questions-tab')">📊 יומן שאלות וטוקנים</button>
+        <button class="tab-button" onclick="switchTab('settings-tab')">⚙️ ניהול מצב דיבאג (בזמן ריצה)</button>
     </div>
 
     <!-- לשונית הערות -->
@@ -485,17 +538,65 @@ REMARKS_HTML_TEMPLATE = """
             {% endif %}
         </div>
     </div>
+
+    <!-- לשונית הגדרות שליטה בזמן ריצה -->
+    <div id="settings-tab" class="tab-content">
+        <div class="debug-card">
+            <h3>שליטה על סטטוס DEBUG_MODE</h3>
+            <p>שינוי המצב כאן יעדכן מיד את קובץ <code>data/debug.txt</code> ב-GitHub וישנה את התנהגות הבוט בזמן אמת ללא צורך ב-Deploy.</p>
+            <hr style="border: 0; border-top: 1px solid #e4e6eb; margin: 20px 0;">
+            
+            <div class="status-indicator">
+                סטטוס נוכחי: 
+                {% if current_debug_mode == 1 %}
+                    <span class="status-active">🟢 פעיל (1) - נתוני טוקנים והערות מוצגים</span>
+                {% else %}
+                    <span class="status-inactive">🔴 כבוי (0) - הבוט במצב נקי ללא תוספות דיבאג</span>
+                {% endif %}
+            </div>
+
+            <button class="btn-toggle" onclick="toggleDebugMode({{ current_debug_mode }})">
+                {% if current_debug_mode == 1 %}
+                    החלף למצב רגיל (DEBUG_MODE = 0)
+                {% else %}
+                    החלף למצב דיבאג (DEBUG_MODE = 1)
+                {% endif %}
+            </button>
+        </div>
+    </div>
 </div>
 
 <script>
     function switchTab(tabId) {
-        // הסתרת כל הלשוניות
         document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
-        
-        // הצגת הלשונית הנבחרת
         document.getElementById(tabId).classList.add('active');
         event.currentTarget.classList.add('active');
+    }
+
+    function toggleDebugMode(currentMode) {
+        const newMode = currentMode === 1 ? 0 : 1;
+        
+        if(!confirm(`האם אתה בטוח שברצונך לשנות את ה-DEBUG_MODE ל-${newMode}?`)) return;
+
+        fetch('/update_debug_toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ debug_mode: newMode })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert(data.message);
+                location.reload(); // רענון עמוד כדי לראות את הסטטוס המעודכן
+            } else {
+                alert('שגיאה: ' + data.message);
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            alert('תרחשה שגיאה בתקשורת עם השרת.');
+        });
     }
 </script>
 </body>
