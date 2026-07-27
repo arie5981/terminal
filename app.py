@@ -211,7 +211,7 @@ def get_or_create_context_cache(client):
         model='gemini-2.5-flash',
         config=types.CreateCachedContentConfig(
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=full_cache_text)])],
-            ttl="3600s"
+            ttl="1200s"
         )
     )
     CACHE_NAME = cache.name
