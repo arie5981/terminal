@@ -8,14 +8,13 @@ import google.generativeai as genai
 app = Flask(__name__)
 
 # ==========================================
-# הגדרות ומפתחות מתוך משתני סביבה (Env Vars)
+# הגדרות ומפתחות מתוך משתני סביבה
 # ==========================================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-GITHUB_REPO = os.environ.get("GITHUB_REPO", "")  # לדוגמה: "username/my-repo"
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
 GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH", "main")
 
-# הגדרת Gemini API
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
@@ -29,7 +28,6 @@ def get_github_headers():
     }
 
 def read_all_lines_from_github_file(file_path):
-    """קורא את כל התוכן של קובץ מ-GitHub"""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return ""
     
@@ -43,14 +41,12 @@ def read_all_lines_from_github_file(file_path):
     return ""
 
 def write_full_file_to_github(file_path, content, commit_message):
-    """כותב או מעדכן קובץ ב-GitHub"""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return False
         
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
     headers = get_github_headers()
     
-    # בדיקה אם הקובץ כבר קיים כדי לקבל את ה-sha שלו
     sha = None
     get_res = requests.get(f"{url}?ref={GITHUB_BRANCH}", headers=headers)
     if get_res.status_code == 200:
@@ -69,7 +65,6 @@ def write_full_file_to_github(file_path, content, commit_message):
     return put_res.status_code in [200, 201]
 
 def append_line_to_github_file(file_path, new_line, commit_message):
-    """מוסיף שורה חדשה לסוף קובץ קיים ב-GitHub"""
     current_content = read_all_lines_from_github_file(file_path)
     if current_content and not current_content.endswith('\n'):
         updated_content = current_content + "\n" + new_line
@@ -78,14 +73,12 @@ def append_line_to_github_file(file_path, new_line, commit_message):
     return write_full_file_to_github(file_path, updated_content, commit_message)
 
 def get_debug_mode():
-    """קורא את מצב הדיבאג מקובץ data/debug.txt"""
     content = read_all_lines_from_github_file("data/debug.txt")
     if content.strip() == "1":
         return 1
     return 0
 
 def write_debug_mode_to_github(mode_value):
-    """מעדכן את מצב הדיבאג ב-GitHub (1 או 0)"""
     return write_full_file_to_github("data/debug.txt", str(mode_value), f"🤖 עדכון מצב דיבאג ל-{mode_value}")
 
 # ==========================================
@@ -178,15 +171,12 @@ def ask():
         try:
             model = genai.GenerativeModel('gemini-1.5-flash')
             
-            # חישוב טוקנים של קלט (אם רוצים לתעד)
             input_tokens = model.count_tokens(question).total_tokens
             
-            # שליחת השאלה לקבלת תשובה
             response = model.generate_content(question)
             output_text = response.text
             output_tokens = model.count_tokens(output_text).total_tokens
 
-            # בדיקה אם מצב דיבאג מופעל לצורך תיעוד לוגים ב-GitHub
             if get_debug_mode() == 1:
                 log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Q: {question} | In-Tokens: {input_tokens} | Out-Tokens: {output_tokens}"
                 append_line_to_github_file("data/questions.txt", log_entry, "🤖 תיעוד שאלה ומדדי טוקנים")
@@ -246,7 +236,7 @@ def view_log():
     </head>
     <body>
         <h2>📋 יומן שאלות ומדדי טוקנים (מהחדש לישן)</h2>
-        <p><a href="/">⬅ חזרה לצ'אט</a> | <a href="/clear_log">🗑 ניקוי יומן</a></p>
+        <p><a href="/">⬅ חזרה לצ'אט</a></p>
         <pre>{{ log_content }}</pre>
     </body>
     </html>
