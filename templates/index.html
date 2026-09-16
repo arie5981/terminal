@@ -114,9 +114,10 @@
             display: flex;
             justify-content: flex-start;
             align-items: center;
-            gap: 12px;
+            gap: 8px;
+            flex-wrap: wrap;
         }
-        .debug-remark-btn {
+        .action-btn-small {
             background-color: #f0f4f9;
             color: #1a73e8;
             border: 1px solid #dadce0;
@@ -130,7 +131,7 @@
             font-family: inherit;
             transition: background-color 0.2s;
         }
-        .debug-remark-btn:hover {
+        .action-btn-small:hover {
             background-color: #e8f0fe;
         }
         .token-usage-badge {
@@ -308,7 +309,7 @@
                 recognition.stop();
                 stopRecordingUI();
             } else {
-                if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+                stopSpeech(); // עצירת הקראה פעילה
                 recognition.start();
                 isRecording = true;
                 const micBtn = document.getElementById('micBtn');
@@ -335,11 +336,18 @@
             };
         }
 
+        // פונקציית עצירת כל הקראה פעילה בדפדפן
+        function stopSpeech() {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+            }
+        }
+
         // פונקציית הקראת טקסט (Text-to-Speech) בעברית משודרגת
         function speakText(text) {
             if (!('speechSynthesis' in window)) return;
             
-            window.speechSynthesis.cancel(); // עצירת הקראות קודמות
+            stopSpeech(); // עצירת הקראות קודמות
             
             // ניקוי HTML ותווי עיצוב לקבלת טקסט נקי להקראה
             let cleanText = text.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
@@ -416,14 +424,24 @@
                 // הקראת תשובת הבוט
                 speakText(data.response);
 
-                // יצירת קונטיינר לכפתור ולנתוני השימוש
+                // יצירת קונטיינר לכפתורי פעולה ולנתוני השימוש
                 const btnWrapper = document.createElement('div');
                 btnWrapper.className = 'btn-container-wrapper';
-                
-                // הוספת כפתור הערות במידה ודיבאג פעיל
+
+                // 1. כפתור עצירת הקראה
+                const stopAudioBtn = document.createElement('button');
+                stopAudioBtn.className = 'action-btn-small';
+                stopAudioBtn.innerHTML = '🔇 עצור הקראה';
+                stopAudioBtn.title = 'לחץ לעצירת הקראת התשובה';
+                stopAudioBtn.onclick = function() {
+                    stopSpeech();
+                };
+                btnWrapper.appendChild(stopAudioBtn);
+
+                // 2. הוספת כפתור הערות במידה ודיבאג פעיל
                 if (data.debug === 1) {
                     const remarkBtn = document.createElement('button');
-                    remarkBtn.className = 'debug-remark-btn';
+                    remarkBtn.className = 'action-btn-small';
                     remarkBtn.innerHTML = '📝 הערות';
                     remarkBtn.onclick = function() {
                         openRemarkModal(data.original_question, data.response);
@@ -431,7 +449,7 @@
                     btnWrapper.appendChild(remarkBtn);
                 }
 
-                // הזרקה חזותית של ה-Usage Metadata (נתוני השימוש)
+                // 3. הזרקה חזותית של ה-Usage Metadata (נתוני השימוש)
                 if (data.usage && Object.keys(data.usage).length > 0) {
                     const usageBadge = document.createElement('div');
                     usageBadge.className = 'token-usage-badge';
@@ -444,9 +462,7 @@
                 }
                 
                 // חיבור של הכל למעטפת ההודעה של הבוט
-                if (btnWrapper.children.length > 0) {
-                    wrapperBot.appendChild(btnWrapper);
-                }
+                wrapperBot.appendChild(btnWrapper);
 
                 setTimeout(() => {
                     wrapperUser.scrollIntoView({ behavior: 'smooth', block: 'start' });
