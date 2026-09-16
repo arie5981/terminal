@@ -204,6 +204,11 @@
             background-color: #dc3545;
             animation: pulse 1.5s infinite;
         }
+        /* עיצוב כפתור עצירת דיבור פעיל */
+        .stop-speaking-btn {
+            background-color: #dc3545 !important;
+            animation: pulse 1.5s infinite;
+        }
         @keyframes pulse {
             0% { transform: scale(1); }
             50% { transform: scale(1.08); }
@@ -245,7 +250,7 @@
         <div class="input-container">
             <textarea class="chat-textarea" id="userInput" placeholder="הקלד או דבר אל המיקרופון..." oninput="autoGrow(this)"></textarea>
             <button class="action-button mic-button" id="micBtn" onclick="toggleVoiceRecognition()" title="דבר למיקרופון">🎤</button>
-            <button class="action-button" id="sendBtn" onclick="sendMessage(false)" title="שלח הודעה">✈</button>
+            <button class="action-button" id="sendBtn" onclick="handleSendOrStop()" title="שלח הודעה">✈</button>
         </div>
     </div>
 
@@ -272,6 +277,7 @@
         let currentActiveResponse = "";
         let recognition = null;
         let isRecording = false;
+        let isSpeaking = false;
 
         // אתחול מנגנון זיהוי דיבור (Web Speech API)
         if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -288,7 +294,7 @@
                 autoGrow(inputElement);
                 stopRecordingUI();
                 
-                // שליחה אוטומטית ברגע שהזיהוי הסתיים + מציין שזו קלט קולי
+                // שליחה אוטומטית מלאה עם הגדרת קלט קולי
                 sendMessage(true);
             };
 
@@ -307,11 +313,16 @@
 
         function toggleVoiceRecognition() {
             if (!recognition) return;
+            
+            // אם הבוט מקריא - עצור הקראה
+            if (isSpeaking) {
+                stopSpeech();
+            }
+
             if (isRecording) {
                 recognition.stop();
                 stopRecordingUI();
             } else {
-                stopSpeech();
                 recognition.start();
                 isRecording = true;
                 const micBtn = document.getElementById('micBtn');
@@ -337,9 +348,36 @@
             };
         }
 
+        // עצירת כל שמע והחזרת הממשק למצב רגיל
         function stopSpeech() {
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
+            }
+            setSpeakingUI(false);
+        }
+
+        // עדכון כפתור השליחה לכפתור עצירה וחזרה
+        function setSpeakingUI(speaking) {
+            isSpeaking = speaking;
+            const sendBtn = document.getElementById('sendBtn');
+            if (!sendBtn) return;
+
+            if (speaking) {
+                sendBtn.textContent = '⏹';
+                sendBtn.classList.add('stop-speaking-btn');
+                sendBtn.title = 'לחץ לעצירת ההקראה';
+            } else {
+                sendBtn.textContent = '✈';
+                sendBtn.classList.remove('stop-speaking-btn');
+                sendBtn.title = 'שלח הודעה';
+            }
+        }
+
+        function handleSendOrStop() {
+            if (isSpeaking) {
+                stopSpeech();
+            } else {
+                sendMessage(false);
             }
         }
 
@@ -361,6 +399,18 @@
                 utterance.voice = hebrewVoice;
             }
 
+            utterance.onstart = function() {
+                setSpeakingUI(true);
+            };
+
+            utterance.onend = function() {
+                setSpeakingUI(false);
+            };
+
+            utterance.onerror = function() {
+                setSpeakingUI(false);
+            };
+
             window.speechSynthesis.speak(utterance);
         }
 
@@ -372,7 +422,6 @@
             }
         }
 
-        // isVoiceInput - מקבל true רק אם השאלה נשאלה דרך המיקרופון
         function sendMessage(isVoiceInput = false) {
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
@@ -420,24 +469,13 @@
             .then(data => {
                 botDiv.innerHTML = data.response;
                 
-                // הקראה מתבצעת רק אם השאלה נשאלה בקול!
+                // הקראה מופעלת אך ורק אם המשתמש שאל דרך המיקרופון
                 if (isVoiceInput) {
                     speakText(data.response);
                 }
 
                 const btnWrapper = document.createElement('div');
                 btnWrapper.className = 'btn-container-wrapper';
-
-                // כפתור עצירה מופיע רק אם הופעלה הקראה קולית
-                if (isVoiceInput) {
-                    const stopAudioBtn = document.createElement('button');
-                    stopAudioBtn.className = 'action-btn-small';
-                    stopAudioBtn.innerHTML = '🔇 עצור הקראה';
-                    stopAudioBtn.onclick = function() {
-                        stopSpeech();
-                    };
-                    btnWrapper.appendChild(stopAudioBtn);
-                }
 
                 if (data.debug === 1) {
                     const remarkBtn = document.createElement('button');
@@ -530,7 +568,10 @@
         document.getElementById('userInput').addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                sendMessage(false);
+                handleSendOrStop();
+            }
+            if (e.key === 'Escape') {
+                stopSpeech();
             }
         });
     </script>
