@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>צ'אט תמיכה למייצגים</title>
-    <!-- הוספת Favicon מתיקיית static -->
     <link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/arie5981/terminal/main/static/favicon16-3.png">
     <style>
         * {
@@ -246,7 +245,7 @@
         <div class="input-container">
             <textarea class="chat-textarea" id="userInput" placeholder="הקלד או דבר אל המיקרופון..." oninput="autoGrow(this)"></textarea>
             <button class="action-button mic-button" id="micBtn" onclick="toggleVoiceRecognition()" title="דבר למיקרופון">🎤</button>
-            <button class="action-button" id="sendBtn" onclick="sendMessage()" title="שלח הודעה">✈</button>
+            <button class="action-button" id="sendBtn" onclick="sendMessage(false)" title="שלח הודעה">✈</button>
         </div>
     </div>
 
@@ -288,6 +287,9 @@
                 inputElement.value = transcript;
                 autoGrow(inputElement);
                 stopRecordingUI();
+                
+                // שליחה אוטומטית ברגע שהזיהוי הסתיים + מציין שזו קלט קולי
+                sendMessage(true);
             };
 
             recognition.onerror = function(event) {
@@ -309,7 +311,7 @@
                 recognition.stop();
                 stopRecordingUI();
             } else {
-                stopSpeech(); // עצירת הקראה פעילה
+                stopSpeech();
                 recognition.start();
                 isRecording = true;
                 const micBtn = document.getElementById('micBtn');
@@ -329,27 +331,23 @@
             }
         }
 
-        // טעינת קולות מראש בדפדפנים שדורשים זאת (כמו Chrome)
         if ('speechSynthesis' in window) {
             window.speechSynthesis.onvoiceschanged = () => {
                 window.speechSynthesis.getVoices();
             };
         }
 
-        // פונקציית עצירת כל הקראה פעילה בדפדפן
         function stopSpeech() {
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
             }
         }
 
-        // פונקציית הקראת טקסט (Text-to-Speech) בעברית משודרגת
         function speakText(text) {
             if (!('speechSynthesis' in window)) return;
             
-            stopSpeech(); // עצירת הקראות קודמות
+            stopSpeech();
             
-            // ניקוי HTML ותווי עיצוב לקבלת טקסט נקי להקראה
             let cleanText = text.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
             if (!cleanText) return;
 
@@ -357,7 +355,6 @@
             utterance.lang = 'he-IL';
             utterance.rate = 1.0;
 
-            // ניסיון לאתר קול עברי מותקן בדפדפן
             const voices = window.speechSynthesis.getVoices();
             const hebrewVoice = voices.find(v => v.lang.includes('he') || v.lang.includes('HE'));
             if (hebrewVoice) {
@@ -375,13 +372,15 @@
             }
         }
 
-        function sendMessage() {
-            // "פתיחת" הרשאות שמע עבור הדפדפן בעקבות אקציית המשתמש
+        // isVoiceInput - מקבל true רק אם השאלה נשאלה דרך המיקרופון
+        function sendMessage(isVoiceInput = false) {
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
-                const silentUtterance = new SpeechSynthesisUtterance('');
-                silentUtterance.lang = 'he-IL';
-                window.speechSynthesis.speak(silentUtterance);
+                if (isVoiceInput) {
+                    const silentUtterance = new SpeechSynthesisUtterance('');
+                    silentUtterance.lang = 'he-IL';
+                    window.speechSynthesis.speak(silentUtterance);
+                }
             }
             
             const inputElement = document.getElementById('userInput');
@@ -421,24 +420,25 @@
             .then(data => {
                 botDiv.innerHTML = data.response;
                 
-                // הקראת תשובת הבוט
-                speakText(data.response);
+                // הקראה מתבצעת רק אם השאלה נשאלה בקול!
+                if (isVoiceInput) {
+                    speakText(data.response);
+                }
 
-                // יצירת קונטיינר לכפתורי פעולה ולנתוני השימוש
                 const btnWrapper = document.createElement('div');
                 btnWrapper.className = 'btn-container-wrapper';
 
-                // 1. כפתור עצירת הקראה
-                const stopAudioBtn = document.createElement('button');
-                stopAudioBtn.className = 'action-btn-small';
-                stopAudioBtn.innerHTML = '🔇 עצור הקראה';
-                stopAudioBtn.title = 'לחץ לעצירת הקראת התשובה';
-                stopAudioBtn.onclick = function() {
-                    stopSpeech();
-                };
-                btnWrapper.appendChild(stopAudioBtn);
+                // כפתור עצירה מופיע רק אם הופעלה הקראה קולית
+                if (isVoiceInput) {
+                    const stopAudioBtn = document.createElement('button');
+                    stopAudioBtn.className = 'action-btn-small';
+                    stopAudioBtn.innerHTML = '🔇 עצור הקראה';
+                    stopAudioBtn.onclick = function() {
+                        stopSpeech();
+                    };
+                    btnWrapper.appendChild(stopAudioBtn);
+                }
 
-                // 2. הוספת כפתור הערות במידה ודיבאג פעיל
                 if (data.debug === 1) {
                     const remarkBtn = document.createElement('button');
                     remarkBtn.className = 'action-btn-small';
@@ -449,7 +449,6 @@
                     btnWrapper.appendChild(remarkBtn);
                 }
 
-                // 3. הזרקה חזותית של ה-Usage Metadata (נתוני השימוש)
                 if (data.usage && Object.keys(data.usage).length > 0) {
                     const usageBadge = document.createElement('div');
                     usageBadge.className = 'token-usage-badge';
@@ -461,8 +460,9 @@
                     btnWrapper.appendChild(usageBadge);
                 }
                 
-                // חיבור של הכל למעטפת ההודעה של הבוט
-                wrapperBot.appendChild(btnWrapper);
+                if (btnWrapper.children.length > 0) {
+                    wrapperBot.appendChild(btnWrapper);
+                }
 
                 setTimeout(() => {
                     wrapperUser.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -530,7 +530,7 @@
         document.getElementById('userInput').addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                sendMessage();
+                sendMessage(false);
             }
         });
     </script>
