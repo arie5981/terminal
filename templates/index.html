@@ -204,7 +204,6 @@
             background-color: #dc3545;
             animation: pulse 1.5s infinite;
         }
-        /* עיצוב כפתור עצירת דיבור פעיל */
         .stop-speaking-btn {
             background-color: #dc3545 !important;
             animation: pulse 1.5s infinite;
@@ -314,7 +313,6 @@
         function toggleVoiceRecognition() {
             if (!recognition) return;
             
-            // אם הבוט מקריא - עצור הקראה
             if (isSpeaking) {
                 stopSpeech();
             }
@@ -348,7 +346,6 @@
             };
         }
 
-        // עצירת כל שמע והחזרת הממשק למצב רגיל
         function stopSpeech() {
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
@@ -356,7 +353,6 @@
             setSpeakingUI(false);
         }
 
-        // עדכון כפתור השליחה לכפתור עצירה וחזרה
         function setSpeakingUI(speaking) {
             isSpeaking = speaking;
             const sendBtn = document.getElementById('sendBtn');
@@ -386,7 +382,24 @@
             
             stopSpeech();
             
-            let cleanText = text.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+            if (!text) return;
+
+            // 1. ניקוי ופענוח ישויות HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = text;
+            let decodedText = tempDiv.textContent || tempDiv.innerText || '';
+
+            // 2. החלפת סימנים וניקוי להקראה שוטפת
+            let cleanText = decodedText
+                // המרת הסימן '>' וסימני חץ לפסיק עם רווח לצורך הפסקה קצרה
+                .replace(/&gt;|>/g, ', ')
+                // ניקוי סימני Markdown מיוחדים (*, #, _)
+                .replace(/[\*\#\_]/g, '')
+                // צמצום פסיקים ורווחים כפולים
+                .replace(/,\s*,+/g, ',')
+                .replace(/\s+/g, ' ')
+                .trim();
+
             if (!cleanText) return;
 
             const utterance = new SpeechSynthesisUtterance(cleanText);
@@ -469,7 +482,6 @@
             .then(data => {
                 botDiv.innerHTML = data.response;
                 
-                // הקראה מופעלת אך ורק אם המשתמש שאל דרך המיקרופון
                 if (isVoiceInput) {
                     speakText(data.response);
                 }
