@@ -298,7 +298,8 @@
                 stopRecordingUI();
             };
         } else {
-            document.getElementById('micBtn').style.display = 'none';
+            const micBtn = document.getElementById('micBtn');
+            if (micBtn) micBtn.style.display = 'none';
         }
 
         function toggleVoiceRecognition() {
@@ -307,12 +308,14 @@
                 recognition.stop();
                 stopRecordingUI();
             } else {
-                window.speechSynthesis.cancel(); // עצירת הקראה פעילה בעת התחלת הקלטה
+                if ('speechSynthesis' in window) window.speechSynthesis.cancel();
                 recognition.start();
                 isRecording = true;
                 const micBtn = document.getElementById('micBtn');
-                micBtn.classList.add('recording');
-                micBtn.textContent = '⏹';
+                if (micBtn) {
+                    micBtn.classList.add('recording');
+                    micBtn.textContent = '⏹';
+                }
             }
         }
 
@@ -325,7 +328,14 @@
             }
         }
 
-        // פונקציית הקראת טקסט (Text-to-Speech) בעברית
+        // טעינת קולות מראש בדפדפנים שדורשים זאת (כמו Chrome)
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.onvoiceschanged = () => {
+                window.speechSynthesis.getVoices();
+            };
+        }
+
+        // פונקציית הקראת טקסט (Text-to-Speech) בעברית משודרגת
         function speakText(text) {
             if (!('speechSynthesis' in window)) return;
             
@@ -339,6 +349,13 @@
             utterance.lang = 'he-IL';
             utterance.rate = 1.0;
 
+            // ניסיון לאתר קול עברי מותקן בדפדפן
+            const voices = window.speechSynthesis.getVoices();
+            const hebrewVoice = voices.find(v => v.lang.includes('he') || v.lang.includes('HE'));
+            if (hebrewVoice) {
+                utterance.voice = hebrewVoice;
+            }
+
             window.speechSynthesis.speak(utterance);
         }
 
@@ -351,7 +368,13 @@
         }
 
         function sendMessage() {
-            window.speechSynthesis.cancel(); // עצירת הקראה קודמת בלחיצה על שליחה
+            // "פתיחת" הרשאות שמע עבור הדפדפן בעקבות אקציית המשתמש
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const silentUtterance = new SpeechSynthesisUtterance('');
+                silentUtterance.lang = 'he-IL';
+                window.speechSynthesis.speak(silentUtterance);
+            }
             
             const inputElement = document.getElementById('userInput');
             const chatContainer = document.getElementById('chatContainer');
