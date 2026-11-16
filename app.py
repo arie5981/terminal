@@ -9,7 +9,7 @@ import threading
 from datetime import datetime
 from google import genai
 from google.genai import types
-import markdown 
+import markdown
 
 app = Flask(__name__)
 
@@ -19,13 +19,13 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 GITHUB_REPO = "arie5981/terminal"
 
 # משתנים גלובליים לנתונים ולניהול ה-Cache
-LINKS_DICTIONARY = {}   
-TERMINAL_CONTENT = ""   
+LINKS_DICTIONARY = {}
+TERMINAL_CONTENT = ""
 CACHE_NAME = None
-CACHE_MODEL = None
-CACHE_DISABLED_UNTIL = 0  # מונע ניסיונות 404 חוזרים בכל שאלה
-LAST_CACHE_DIAGNOSTIC = ""
+CACHE_DISABLED_UNTIL = 0
+LAST_CACHE_ERROR = ""
 
+CACHE_MODEL_NAME = "models/gemini-2.5-flash"
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 CACHE_INFO_FILE = os.path.join(DATA_DIR, "cache_info.json")
 
@@ -62,6 +62,13 @@ SYSTEM_INSTRUCTION = (
     "2. 📞 מספרי טלפון/מוקד עם כוכבית: מספרי מוקד הכוללים כוכבית (כמו `6050*`) נתווסף סביבם קוד נקי בפורמט `6050*` כדי למנוע שיבושי תצוגה.\n"
     "3. 🎬 סרטוני הדרכה: אם בנוהל הרלוונטי מופיע אזכור לסרטון (כגון 'סרטון: ... [שם הסרטון]'), חובה להוסיף בסוף התשובה שורה נפרדת בדיוק בנוסח: 'סרטון הדרכה: [שם הסרטון]' תוך שמירה מדויקת על השם בתוך הסוגריים המרובעים."
 )
+
+def get_gemini_client():
+    """יוצר מופע של Gemini Client עם v1beta לתמיכה מלאה ב-Context Caching"""
+    return genai.Client(
+        api_key=gemini_api_key,
+        http_options={'api_version': 'v1beta'}
+    )
 
 def get_debug_mode():
     content = read_all_lines_from_github_file("data/debug.txt")
@@ -102,7 +109,7 @@ def append_line_to_github_file(repo_filepath, new_line_content):
             file_data = res.json()
             sha = file_data.get("sha")
             current_content = base64.b64decode(file_data.get("content")).decode("utf-8")
-        
+
         if current_content and not current_content.endswith("\n"):
             current_content += "\n"
         updated_content = current_content + new_line_content
@@ -170,114 +177,71 @@ load_terminal_data_directly()
 
 def reset_cache_state():
     """מנקה את מזהה ה-Cache מהזיכרון ומהקובץ המקומי"""
-    global CACHE_NAME, CACHE_MODEL
+    global CACHE_NAME
     CACHE_NAME = None
-    CACHE_MODEL = None
     if os.path.exists(CACHE_INFO_FILE):
         try:
             os.remove(CACHE_INFO_FILE)
         except Exception:
             pass
 
-def discover_cacheable_models(client):
-    """סורק את המודלים בחשבון ומאתר את אלו שתומכים ב-createCachedContent"""
-    cacheable = []
-    all_flash = []
-    try:
-        for m in client.models.list():
-            name = getattr(m, 'name', '')
-            actions = getattr(m, 'supported_actions', []) or []
-            if 'flash' in name.lower():
-                all_flash.append(f"{name}({','.join(actions)})")
-            if 'createCachedContent' in actions:
-                cacheable.append(name)
-    except Exception as e:
-        return [], [f"list_error: {str(e)}"]
-    return cacheable, all_flash
-
 def get_or_create_context_cache(client):
-    """מנהל יצירה ושליפה חכמה של Context Cache עם איתור אוטומטי של המודל התומך"""
-    global CACHE_NAME, CACHE_MODEL, CACHE_DISABLED_UNTIL, LAST_CACHE_DIAGNOSTIC
+    """יוצר או שולף Context Cache מול v1beta ללא לולאות מיותרות"""
+    global CACHE_NAME, CACHE_DISABLED_UNTIL, LAST_CACHE_ERROR
 
-    # אם יצירת ה-Cache נכשלה לאחרונה, אל תאט כל שאלה עם ניסיונות כושלים למשך 10 דקות
     if time.time() < CACHE_DISABLED_UNTIL:
-        return None, None
+        return None
 
-    if (not CACHE_NAME or not CACHE_MODEL) and os.path.exists(CACHE_INFO_FILE):
+    if not CACHE_NAME and os.path.exists(CACHE_INFO_FILE):
         try:
             with open(CACHE_INFO_FILE, "r", encoding="utf-8") as f:
                 saved_data = json.load(f)
                 CACHE_NAME = saved_data.get("cache_name")
-                CACHE_MODEL = saved_data.get("cache_model")
         except Exception:
             reset_cache_state()
 
-    if CACHE_NAME and CACHE_MODEL:
+    if CACHE_NAME:
         try:
             existing_cache = client.caches.get(name=CACHE_NAME)
             if hasattr(existing_cache, 'state') and str(existing_cache.state) not in ["STATE_ACTIVE", "ACTIVE"]:
                 reset_cache_state()
             else:
-                LAST_CACHE_DIAGNOSTIC = ""
-                return existing_cache, CACHE_MODEL
+                LAST_CACHE_ERROR = ""
+                return existing_cache
         except Exception:
             reset_cache_state()
-
-    # סריקת מודלים תומכי Cache בחשבון
-    cacheable_models, all_flash_debug = discover_cacheable_models(client)
-    
-    # סידור עדיפויות: קודם 2.5-flash, אחר כך שאר גרסאות flash התומכות ב-Cache
-    prioritized = sorted(
-        cacheable_models,
-        key=lambda x: (0 if '2.5-flash' in x else (1 if 'flash' in x else 2), x)
-    )
-
-    if not prioritized:
-        CACHE_DISABLED_UNTIL = time.time() + 600
-        LAST_CACHE_DIAGNOSTIC = f"לא נמצאו מודלים עם createCachedContent. מודלי Flash זמינים: {', '.join(all_flash_debug)}"
-        return None, None
 
     full_cache_text = (
         f"{SYSTEM_INSTRUCTION}\n\n"
         f"=== קובץ הנהלים הרשמי והמלא (CONTEXT) ===\n{TERMINAL_CONTENT}\n=========================================\n"
     )
 
-    errors = []
-    for model_name in prioritized:
-        try:
-            cache = client.caches.create(
-                model=model_name,
-                config=types.CreateCachedContentConfig(
-                    contents=[
-                        types.Content(
-                            role="user", 
-                            parts=[types.Part.from_text(text=full_cache_text)]
-                        )
-                    ],
-                    ttl="3600s"  # שמירה למשך שעה שלמה
-                )
+    try:
+        cache = client.caches.create(
+            model=CACHE_MODEL_NAME,
+            config=types.CreateCachedContentConfig(
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[types.Part.from_text(text=full_cache_text)]
+                    )
+                ],
+                ttl="3600s"
             )
-            CACHE_NAME = cache.name
-            CACHE_MODEL = model_name
-            LAST_CACHE_DIAGNOSTIC = ""
-            try:
-                with open(CACHE_INFO_FILE, "w", encoding="utf-8") as f:
-                    json.dump({
-                        "cache_name": CACHE_NAME,
-                        "cache_model": CACHE_MODEL,
-                        "created_at": time.time()
-                    }, f)
-            except Exception:
-                pass
-            return cache, CACHE_MODEL
-        except Exception as e:
-            errors.append(f"{model_name}: {str(e)}")
-            continue
-
-    CACHE_DISABLED_UNTIL = time.time() + 600
-    LAST_CACHE_DIAGNOSTIC = " | ".join(errors)
-    reset_cache_state()
-    return None, None
+        )
+        CACHE_NAME = cache.name
+        LAST_CACHE_ERROR = ""
+        try:
+            with open(CACHE_INFO_FILE, "w", encoding="utf-8") as f:
+                json.dump({"cache_name": CACHE_NAME, "created_at": time.time()}, f)
+        except Exception:
+            pass
+        return cache
+    except Exception as e:
+        CACHE_DISABLED_UNTIL = time.time() + 600
+        LAST_CACHE_ERROR = str(e)
+        reset_cache_state()
+        return None
 
 def inject_hyperlinks(text):
     if not text:
@@ -336,12 +300,12 @@ def chat():
 
     for attempt in range(max_retries):
         try:
-            client = genai.Client(api_key=gemini_api_key)
-            cache_content, active_cache_model = get_or_create_context_cache(client)
+            client = get_gemini_client()
+            cache_content = get_or_create_context_cache(client)
 
-            if cache_content and active_cache_model:
+            if cache_content and hasattr(cache_content, 'name'):
                 response = client.models.generate_content(
-                    model=active_cache_model,
+                    model=CACHE_MODEL_NAME,
                     contents=history_contents,
                     config=types.GenerateContentConfig(
                         cached_content=cache_content.name,
@@ -351,28 +315,28 @@ def chat():
             else:
                 direct_contents = [
                     types.Content(
-                        role="user", 
+                        role="user",
                         parts=[types.Part.from_text(text=f"{SYSTEM_INSTRUCTION}\n\nקובץ הנהלים:\n{TERMINAL_CONTENT}")]
                     )
                 ] + history_contents
 
                 response = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model=CACHE_MODEL_NAME,
                     contents=direct_contents,
                     config=types.GenerateContentConfig(temperature=0.0)
                 )
-            
+
             if not response or not response.text:
                 raise ValueError("התשובה שהתקבלה מגוגל ריקה.")
-                
+
             raw_answer = response.text
             html_answer = markdown.markdown(raw_answer, extensions=['nl2br'])
             final_answer = inject_hyperlinks(html_answer)
-            
+
             p_tokens = response.usage_metadata.prompt_token_count if response.usage_metadata else 0
             c_tokens = response.usage_metadata.cached_content_token_count if response.usage_metadata else 0
             o_tokens = response.usage_metadata.candidates_token_count if response.usage_metadata else 0
-            
+
             usage_info = {
                 "prompt_tokens": p_tokens,
                 "cached_tokens": c_tokens or 0,
@@ -381,13 +345,13 @@ def chat():
 
             if current_debug_mode == 1:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                diag_note = f" | אבחון Cache: {LAST_CACHE_DIAGNOSTIC}" if LAST_CACHE_DIAGNOSTIC else ""
+                err_note = f" | שגיאת Cache: {LAST_CACHE_ERROR}" if LAST_CACHE_ERROR else ""
                 log_entry = (
                     f"[{timestamp}] השאלה: {user_question} | "
-                    f"קלט: {p_tokens}, מתוך ה-Cache: {c_tokens or 0}, פלט: {o_tokens}{diag_note}\n"
+                    f"קלט: {p_tokens}, מתוך ה-Cache: {c_tokens or 0}, פלט: {o_tokens}{err_note}\n"
                 )
                 threading.Thread(target=append_line_to_github_file, args=("data/questions.txt", log_entry)).start()
-            
+
             return jsonify({
                 "response": final_answer,
                 "debug": current_debug_mode,
@@ -401,12 +365,12 @@ def chat():
                 reset_cache_state()
                 if attempt < max_retries - 1:
                     continue
-                    
+
             if "503" in error_str or "500" in error_str or "UNAVAILABLE" in error_str:
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay * (attempt + 1))
                     continue
-            
+
             return jsonify({
                 "response": f"שגיאת מערכת מגוגל: {error_str}",
                 "debug": current_debug_mode,
@@ -480,8 +444,8 @@ def show_remarks():
     questions_list.reverse()
 
     return render_template_string(
-        REMARKS_HTML_TEMPLATE, 
-        remarks=remarks_list, 
+        REMARKS_HTML_TEMPLATE,
+        remarks=remarks_list,
         questions=questions_list,
         current_debug_mode=get_debug_mode(),
         current_voice_mode=get_voice_mode()
