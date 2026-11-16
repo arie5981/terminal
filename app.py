@@ -245,7 +245,7 @@ def save_remark():
             "response": data.get("response", "").strip()
         }
         threading.Thread(target=append_line_to_github_file, args=("data/remarks.txt", json.dumps(remark_entry, ensure_ascii=False) + "\n")).start()
-        return jsonify({"status": "success", "message": "ההערה נשמרה"})
+        return jsonify({"status": "success", "message": "ההערה נשלחה לשמירה בהצלחה"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
@@ -293,36 +293,247 @@ def show_remarks():
     questions_list = [q.strip() for q in read_all_lines_from_github_file("data/questions.txt").splitlines() if q.strip()]
     questions_list.reverse()
 
-    return render_template_string(REMARKS_HTML_TEMPLATE, remarks=remarks_list, questions=questions_list, current_debug_mode=get_debug_mode(), current_voice_mode=get_voice_mode())
+    return render_template_string(
+        REMARKS_HTML_TEMPLATE, 
+        remarks=remarks_list, 
+        questions=questions_list,
+        current_debug_mode=get_debug_mode(),
+        current_voice_mode=get_voice_mode()
+    )
 
 REMARKS_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>מרכז בקרה</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>מרכז בקרה ודיבאג - מייצגים</title>
     <style>
-        body { font-family: sans-serif; background: #f4f6f9; padding: 20px; }
-        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
-        h1 { color: #1e3a8a; }
-        .btn { background: #1e3a8a; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 1300px; margin: 0 auto; }
+        h1 { color: #1e3a8a; border-bottom: 3px solid #1e3a8a; padding-bottom: 10px; margin-bottom: 20px; font-size: 24px; }
+        
+        /* עיצוב לשוניות */
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #ccd0d5; padding-bottom: 10px; }
+        .tab-button { background-color: #e4e6eb; border: none; padding: 10px 20px; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; color: #4b5563; transition: all 0.2s; }
+        .tab-button.active { background-color: #1e3a8a; color: white; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .summary-badge { background-color: #1e3a8a; color: white; padding: 4px 12px; border-radius: 12px; font-size: 14px; display: inline-block; margin-bottom: 15px; }
+        .table-container { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; text-align: right; table-layout: fixed; }
+        th { background-color: #1e3a8a; color: white; padding: 12px 15px; font-weight: bold; font-size: 15px; }
+        td { padding: 12px 15px; border-bottom: 1px solid #e4e6eb; font-size: 14px; vertical-align: top; line-height: 1.5; word-wrap: break-word; }
+        tr:hover { background-color: #f8fafc; }
+        
+        .timestamp { color: #666; font-size: 12px; white-space: nowrap; }
+        .author { font-weight: bold; color: #007bff; }
+        .remark-text { background-color: #fff9db; padding: 6px 10px; border-right: 3px solid #fcc419; border-radius: 4px; font-weight: 500; }
+        .box-content { max-height: 200px; overflow-y: auto; background-color: #f8f9fa; padding: 8px; border-radius: 4px; font-size: 13px; white-space: pre-line; }
+        .no-remarks { text-align: center; padding: 40px; color: #666; font-size: 16px; }
+        
+        .btn-delete { background-color: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 13px; cursor: pointer; transition: background-color 0.2s; }
+        .btn-delete:hover { background-color: #dc2626; }
+
+        /* יומן שאלות */
+        .questions-list { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 15px; }
+        .question-item { padding: 12px; border-bottom: 1px solid #e4e6eb; font-family: monospace; font-size: 14px; direction: ltr; text-align: left; }
+        .question-item:last-child { border-bottom: none; }
+
+        /* לשונית הגדרות דיבאג וקול */
+        .settings-grid { display: flex; gap: 20px; flex-wrap: wrap; }
+        .debug-card { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 25px; flex: 1; min-width: 320px; max-width: 500px; }
+        .status-indicator { font-size: 18px; font-weight: bold; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+        .status-active { color: #2f9e44; }
+        .status-inactive { color: #e03131; }
+        .btn-toggle { background-color: #1e3a8a; color: white; border: none; padding: 12px 24px; font-size: 15px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: background-color 0.2s; }
+        .btn-toggle:hover { background-color: #1d4ed8; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>מרכז בקרה וניהול</h1>
-    <p>סטטוס Debug: {{ current_debug_mode }} | סטטוס Voice: {{ current_voice_mode }}</p>
-    <button class="btn" onclick="toggleDebug()">החלף מצב Debug</button>
-    <button class="btn" onclick="toggleVoice()">החלף מצב Voice</button>
+    <h1>📝 מרכז בקרה ודיבאג - אתר מייצגים</h1>
+    
+    <div class="tabs">
+        <button class="tab-button active" onclick="switchTab(event, 'remarks-tab')">💬 הערות ופידבק משתמשים</button>
+        <button class="tab-button" onclick="switchTab(event, 'questions-tab')">📊 יומן שאלות וטוקנים</button>
+        <button class="tab-button" onclick="switchTab(event, 'settings-tab')">⚙️ ניהול הגדרות מערכת (בזמן ריצה)</button>
+    </div>
+
+    <!-- לשונית הערות -->
+    <div id="remarks-tab" class="tab-content active">
+        <div class="summary-badge">סה"כ הערות שנאספו: {{ remarks|length }}</div>
+        <div class="table-container">
+            {% if remarks %}
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 14%;">זמן ומעיר</th>
+                        <th style="width: 23%;">ההערה שנכתבה</th>
+                        <th style="width: 23%;">השאלה המקורית</th>
+                        <th style="width: 30%;">תשובת הבוט (מורחב)</th>
+                        <th style="width: 10%; text-align: center;">פעולות</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in remarks %}
+                    <tr>
+                        <td>
+                            <div class="timestamp">{{ r.timestamp }}</div>
+                            <div class="author">{{ r.author }}</div>
+                        </td>
+                        <td>
+                            <div class="remark-text">{{ r.remark }}</div>
+                        </td>
+                        <td>
+                            <div class="box-content">{{ r.question }}</div>
+                        </td>
+                        <td>
+                            <div class="box-content" style="background-color: #f1f5f9;">{{ r.response | striptags }}</div>
+                        </td>
+                        <td style="text-align: center; vertical-align: middle;">
+                            <button class="btn-delete" onclick="deleteRemark({{ r.original_index }})">🗑️ מחיקה</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="no-remarks">טרם נרשמו הערות במערכת.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- לשונית שאלות -->
+    <div id="questions-tab" class="tab-content">
+        <div class="summary-badge">סה"כ שאלות ביומן: {{ questions|length }}</div>
+        <div class="questions-list">
+            {% if questions %}
+                {% for q in questions %}
+                    <div class="question-item">{{ q }}</div>
+                {% endfor %}
+            {% else %}
+                <div class="no-remarks">יומן השאלות ריק כרגע.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- לשונית הגדרות שליטה בזמן ריצה -->
+    <div id="settings-tab" class="tab-content">
+        <div class="settings-grid">
+            <!-- כרטיס דיבאג -->
+            <div class="debug-card">
+                <h3>שליטה על סטטוס DEBUG_MODE</h3>
+                <p>שינוי המצב כאן יעדכן מיד את קובץ <code>data/debug.txt</code> ב-GitHub וישנה את התנהגות הבוט בזמן אמת ללא צורך ב-Deploy.</p>
+                <hr style="border: 0; border-top: 1px solid #e4e6eb; margin: 20px 0;">
+                
+                <div class="status-indicator">
+                    סטטוס נוכחי: 
+                    {% if current_debug_mode == 1 %}
+                        <span class="status-active">🟢 פעיל (1) - נתוני טוקנים והערות מוצגים</span>
+                    {% else %}
+                        <span class="status-inactive">🔴 כבוי (0) - הבוט במצב נקי ללא תוספות דיבאג</span>
+                    {% endif %}
+                </div>
+
+                <button class="btn-toggle" onclick="toggleDebugMode({{ current_debug_mode }})">
+                    {% if current_debug_mode == 1 %}
+                        החלף למצב רגיל (DEBUG_MODE = 0)
+                    {% else %}
+                        החלף למצב דיבאג (DEBUG_MODE = 1)
+                    {% endif %}
+                </button>
+            </div>
+
+            <!-- כרטיס מיקרופון וקול -->
+            <div class="debug-card">
+                <h3>🎤 שליטה על הצגת מיקרופון והקראת קול</h3>
+                <p>שינוי המצב כאן יעדכן מיד את קובץ <code>data/voice.txt</code> ב-GitHub ויקבע האם כפתור המיקרופון והקראת התשובות יוצגו למשתמשים באתר.</p>
+                <hr style="border: 0; border-top: 1px solid #e4e6eb; margin: 20px 0;">
+                
+                <div class="status-indicator">
+                    סטטוס נוכחי: 
+                    {% if current_voice_mode == 1 %}
+                        <span class="status-active">🟢 פעיל (1) - מיקרופון והקראה מוצגים</span>
+                    {% else %}
+                        <span class="status-inactive">🔴 כבוי (0) - מיקרופון והקראה מוסתרים</span>
+                    {% endif %}
+                </div>
+
+                <button class="btn-toggle" onclick="toggleVoiceMode({{ current_voice_mode }})">
+                    {% if current_voice_mode == 1 %}
+                        הסתר מיקרופון וקול (VOICE = 0)
+                    {% else %}
+                        הצג מיקרופון וקול (VOICE = 1)
+                    {% endif %}
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
+
 <script>
-    function toggleDebug() {
-        fetch('/update_debug_toggle', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({debug_mode: {{ 1 if current_debug_mode == 0 else 0 }}})})
-        .then(() => location.reload());
+    function switchTab(event, tabId) {
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
+        document.getElementById(tabId).classList.add('active');
+        event.currentTarget.classList.add('active');
     }
-    function toggleVoice() {
-        fetch('/update_voice_toggle', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({voice_mode: {{ 1 if current_voice_mode == 0 else 0 }}})})
-        .then(() => location.reload());
+
+    function deleteRemark(originalIndex) {
+        if(!confirm('האם אתה בטוח שברצונך למחוק הערה זו? היא תועבר לקובץ deleted_remarks.txt.')) return;
+
+        fetch('/delete_remark', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ index: originalIndex })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert(data.message);
+                location.reload();
+            } else {
+                alert('שגיאה: ' + data.message);
+            }
+        });
+    }
+
+    function toggleDebugMode(currentMode) {
+        const newMode = currentMode === 1 ? 0 : 1;
+        if(!confirm(`האם אתה בטוח שברצונך לשנות את ה-DEBUG_MODE ל-${newMode}?`)) return;
+
+        fetch('/update_debug_toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ debug_mode: newMode })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert(data.message);
+                location.reload();
+            }
+        });
+    }
+
+    function toggleVoiceMode(currentMode) {
+        const newMode = currentMode === 1 ? 0 : 1;
+        if(!confirm(`האם אתה בטוח שברצונך לשנות את הצגת המיקרופון והקול ל-${newMode}?`)) return;
+
+        fetch('/update_voice_toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ voice_mode: newMode })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert(data.message);
+                location.reload();
+            }
+        });
     }
 </script>
 </body>
