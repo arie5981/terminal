@@ -34,7 +34,6 @@ if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
 # הנחיות המערכת הקבועות
-# הנחיות המערכת הקבועות
 SYSTEM_INSTRUCTION = (
     "אתה עוזר דיגיטלי מקצועי, אדיב, ענייני וממוקד של אתר מייצגים בגביה של הביטוח הלאומי.\n"
     "תפקידך לענות בצורה ישירה וברורה על השאלה שנשאלת, מתוך הסתמכות מלאה על קובץ הנהלים המצורף למטה.\n\n"
@@ -70,11 +69,22 @@ def get_debug_mode():
     content = read_all_lines_from_github_file("data/debug.txt")
     if content and content.strip() in ["1", "0"]:
         return int(content.strip())
-    return 0  # ברירת מחדל במקרה של שגיאה או קובץ ריק
+    return 0
 
 def write_debug_mode_to_github(mode_value):
     """מעדכן את מצב הדיבאג בתוך קובץ debug.txt ב-GitHub על ידי דריסה מלאה"""
     return write_full_file_to_github("data/debug.txt", str(mode_value), f"🤖 מערכת דיבאג: עדכון סטטוס ל-{mode_value}")
+
+def get_voice_mode():
+    """קורא את מצב הקול (Voice) הנוכחי מתוך קובץ voice.txt ב-GitHub"""
+    content = read_all_lines_from_github_file("data/voice.txt")
+    if content and content.strip() in ["1", "0"]:
+        return int(content.strip())
+    return 1  # ברירת מחדל: פעיל (1) אם הקובץ טרם נוצר
+
+def write_voice_mode_to_github(mode_value):
+    """מעדכן את מצב הקול בתוך קובץ voice.txt ב-GitHub"""
+    return write_full_file_to_github("data/voice.txt", str(mode_value), f"🎤 מערכת בקרה: עדכון סטטוס קול ל-{mode_value}")
 
 def clean_html_for_history(text):
     """מנקה תגיות HTML מהיסטוריית השיחה בצורה בטוחה ומנועת קריסות"""
@@ -262,7 +272,8 @@ def inject_hyperlinks(text):
     
 @app.route('/')
 def home():
-    return render_template('index.html')
+    current_voice_mode = get_voice_mode()
+    return render_template('index.html', voice_mode=current_voice_mode)
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -352,7 +363,6 @@ def chat():
                     f"[{timestamp}] השאלה: {user_question} | "
                     f"קלט: {p_tokens}, מתוך ה-Cache: {c_tokens}, פלט: {o_tokens}\n"
                 )
-                # כתיבה אסינכרונית ב-Thread נפרד למניעת השהיה בתשובה
                 threading.Thread(
                     target=append_line_to_github_file,
                     args=("data/questions.txt", log_entry)
@@ -397,8 +407,6 @@ def save_remark():
 
         remark_line = json.dumps(remark_entry, ensure_ascii=False) + "\n"
         
-        # שמירה במקביל / כתיבה אסינכרונית בשרת (Threading)
-        # הבקשה תחזיר תגובה מיידית לדפדפן והשמירה ל-GitHub תתבצע ברקע
         threading.Thread(
             target=append_line_to_github_file, 
             args=("data/remarks.txt", remark_line)
@@ -413,7 +421,7 @@ def delete_remark():
     """מחיקת הערה מ-remarks.txt והעברתה ל-deleted_remarks.txt"""
     try:
         data = request.json or {}
-        index = data.get("index")  # האינדקס של ההערה ברשימה המקורית
+        index = data.get("index")
 
         if index is None or not isinstance(index, int):
             return jsonify({"status": "error", "message": "אינדקס לא תקין"}), 400
@@ -424,13 +432,10 @@ def delete_remark():
         if index < 0 or index >= len(lines):
             return jsonify({"status": "error", "message": "הערה לא נמצאה"}), 404
 
-        # שליפת השורה למחיקה
         deleted_line = lines.pop(index)
 
-        # 1. הוספת השורה שנמחקה ל-deleted_remarks.txt
         append_line_to_github_file("data/deleted_remarks.txt", deleted_line + "\n")
 
-        # 2. עדכון קובץ remarks.txt ללא השורה שנמחקה
         updated_content = "\n".join(lines) + ("\n" if lines else "")
         success = write_full_file_to_github(
             "data/remarks.txt", 
@@ -460,9 +465,24 @@ def update_debug_toggle():
     else:
         return jsonify({"status": "error", "message": "שגיאה בעדכון הקובץ ב-GitHub"}), 500
 
+@app.route('/update_voice_toggle', methods=['POST'])
+def update_voice_toggle():
+    """ראוט שמקבל בקשה לשינוי מצב הקול (Voice) וכותב אותה ל-GitHub"""
+    data = request.json or {}
+    new_mode = data.get("voice_mode")
+    if new_mode not in [0, 1]:
+        return jsonify({"status": "error", "message": "ערך לא תקין"}), 400
+        
+    success = write_voice_mode_to_github(new_mode)
+    if success:
+        return jsonify({"status": "success", "message": f"הצגת מיקרופון וקול עודכנה ל-{new_mode} בהצלחה"})
+    else:
+        return jsonify({"status": "error", "message": "שגיאה בעדכון הקובץ ב-GitHub"}), 500
+
 @app.route('/remarks', methods=['GET'])
 def show_remarks():
     current_debug_mode = get_debug_mode()
+    current_voice_mode = get_voice_mode()
 
     # 1. קריאת הערות (remarks.txt)
     remarks_list = []
@@ -472,11 +492,11 @@ def show_remarks():
         for idx, line in enumerate(raw_lines):
             try:
                 item = json.loads(line)
-                item['original_index'] = idx  # שמירת האינדקס המקורי למחיקה מדויקת
+                item['original_index'] = idx
                 remarks_list.append(item)
             except Exception:
                 continue
-    remarks_list.reverse()  # הצגה מהחדש לישן
+    remarks_list.reverse()
 
     # 2. קריאת שאלות (questions.txt)
     questions_list = []
@@ -491,7 +511,8 @@ def show_remarks():
         REMARKS_HTML_TEMPLATE, 
         remarks=remarks_list, 
         questions=questions_list,
-        current_debug_mode=current_debug_mode
+        current_debug_mode=current_debug_mode,
+        current_voice_mode=current_voice_mode
     )
 
 # --- תבנית ה-HTML לעמוד ה-Remarks המורחב עם 3 לשוניות ---
@@ -535,8 +556,9 @@ REMARKS_HTML_TEMPLATE = """
         .question-item { padding: 12px; border-bottom: 1px solid #e4e6eb; font-family: monospace; font-size: 14px; direction: ltr; text-align: left; }
         .question-item:last-child { border-bottom: none; }
 
-        /* לשונית הגדרות דיבאג */
-        .debug-card { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 25px; max-width: 500px; }
+        /* לשונית הגדרות דיבאג וקול */
+        .settings-grid { display: flex; gap: 20px; flex-wrap: wrap; }
+        .debug-card { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 25px; flex: 1; min-width: 320px; max-width: 500px; }
         .status-indicator { font-size: 18px; font-weight: bold; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
         .status-active { color: #2f9e44; }
         .status-inactive { color: #e03131; }
@@ -549,9 +571,9 @@ REMARKS_HTML_TEMPLATE = """
     <h1>📝 מרכז בקרה ודיבאג - אתר מייצגים</h1>
     
     <div class="tabs">
-        <button class="tab-button active" onclick="switchTab('remarks-tab')">💬 הערות ופידבק משתמשים</button>
-        <button class="tab-button" onclick="switchTab('questions-tab')">📊 יומן שאלות וטוקנים</button>
-        <button class="tab-button" onclick="switchTab('settings-tab')">⚙️ ניהול מצב דיבאג (בזמן ריצה)</button>
+        <button class="tab-button active" onclick="switchTab(event, 'remarks-tab')">💬 הערות ופידבק משתמשים</button>
+        <button class="tab-button" onclick="switchTab(event, 'questions-tab')">📊 יומן שאלות וטוקנים</button>
+        <button class="tab-button" onclick="switchTab(event, 'settings-tab')">⚙️ ניהול הגדרות מערכת (בזמן ריצה)</button>
     </div>
 
     <!-- לשונית הערות -->
@@ -614,33 +636,60 @@ REMARKS_HTML_TEMPLATE = """
 
     <!-- לשונית הגדרות שליטה בזמן ריצה -->
     <div id="settings-tab" class="tab-content">
-        <div class="debug-card">
-            <h3>שליטה על סטטוס DEBUG_MODE</h3>
-            <p>שינוי המצב כאן יעדכן מיד את קובץ <code>data/debug.txt</code> ב-GitHub וישנה את התנהגות הבוט בזמן אמת ללא צורך ב-Deploy.</p>
-            <hr style="border: 0; border-top: 1px solid #e4e6eb; margin: 20px 0;">
-            
-            <div class="status-indicator">
-                סטטוס נוכחי: 
-                {% if current_debug_mode == 1 %}
-                    <span class="status-active">🟢 פעיל (1) - נתוני טוקנים והערות מוצגים</span>
-                {% else %}
-                    <span class="status-inactive">🔴 כבוי (0) - הבוט במצב נקי ללא תוספות דיבאג</span>
-                {% endif %}
+        <div class="settings-grid">
+            <!-- כרטיס דיבאג -->
+            <div class="debug-card">
+                <h3>שליטה על סטטוס DEBUG_MODE</h3>
+                <p>שינוי המצב כאן יעדכן מיד את קובץ <code>data/debug.txt</code> ב-GitHub וישנה את התנהגות הבוט בזמן אמת ללא צורך ב-Deploy.</p>
+                <hr style="border: 0; border-top: 1px solid #e4e6eb; margin: 20px 0;">
+                
+                <div class="status-indicator">
+                    סטטוס נוכחי: 
+                    {% if current_debug_mode == 1 %}
+                        <span class="status-active">🟢 פעיל (1) - נתוני טוקנים והערות מוצגים</span>
+                    {% else %}
+                        <span class="status-inactive">🔴 כבוי (0) - הבוט במצב נקי ללא תוספות דיבאג</span>
+                    {% endif %}
+                </div>
+
+                <button class="btn-toggle" onclick="toggleDebugMode({{ current_debug_mode }})">
+                    {% if current_debug_mode == 1 %}
+                        החלף למצב רגיל (DEBUG_MODE = 0)
+                    {% else %}
+                        החלף למצב דיבאג (DEBUG_MODE = 1)
+                    {% endif %}
+                </button>
             </div>
 
-            <button class="btn-toggle" onclick="toggleDebugMode({{ current_debug_mode }})">
-                {% if current_debug_mode == 1 %}
-                    החלף למצב רגיל (DEBUG_MODE = 0)
-                {% else %}
-                    החלף למצב דיבאג (DEBUG_MODE = 1)
-                {% endif %}
-            </button>
+            <!-- כרטיס מיקרופון וקול -->
+            <div class="debug-card">
+                <h3>🎤 שליטה על הצגת מיקרופון והקראת קול</h3>
+                <p>שינוי המצב כאן יעדכן מיד את קובץ <code>data/voice.txt</code> ב-GitHub ויקבע האם כפתור המיקרופון והקראת התשובות יוצגו למשתמשים באתר.</p>
+                <hr style="border: 0; border-top: 1px solid #e4e6eb; margin: 20px 0;">
+                
+                <div class="status-indicator">
+                    סטטוס נוכחי: 
+                    {% if current_voice_mode == 1 %}
+                        <span class="status-active">🟢 פעיל (1) - מיקרופון והקראה מוצגים</span>
+                    {% else %}
+                        <span class="status-inactive">🔴 כבוי (0) - מיקרופון והקראה מוסתרים</span>
+                    {% endif %}
+                </div>
+
+                <button class="btn-toggle" onclick="toggleVoiceMode({{ current_voice_mode }})">
+                    {% if current_voice_mode == 1 %}
+                        הסתר מיקרופון וקול (VOICE = 0)
+                    {% else %}
+                        הצג מיקרופון וקול (VOICE = 1)
+                    {% endif %}
+                </button>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
-    function switchTab(tabId) {
+    function switchTab(event, tabId) {
         document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
         document.getElementById(tabId).classList.add('active');
@@ -684,7 +733,32 @@ REMARKS_HTML_TEMPLATE = """
         .then(data => {
             if (data.status === 'success') {
                 alert(data.message);
-                location.reload(); // רענון עמוד כדי לראות את הסטטוס המעודכן
+                location.reload();
+            } else {
+                alert('שגיאה: ' + data.message);
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            alert('תרחשה שגיאה בתקשורת עם השרת.');
+        });
+    }
+
+    function toggleVoiceMode(currentMode) {
+        const newMode = currentMode === 1 ? 0 : 1;
+        
+        if(!confirm(`האם אתה בטוח שברצונך לשנות את הצגת המיקרופון והקול ל-${newMode}?`)) return;
+
+        fetch('/update_voice_toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ voice_mode: newMode })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert(data.message);
+                location.reload();
             } else {
                 alert('שגיאה: ' + data.message);
             }
