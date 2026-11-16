@@ -176,7 +176,7 @@ def reset_cache_state():
             pass
 
 def get_or_create_context_cache(client):
-    """מנהל את יצירת או שליפת ה-Context Cache בצורה תואמת ל-google-genai SDK"""
+    """מנהל את יצירת או שליפת ה-Context Cache עם בדיקת תאימות לשם המודל ומנגנון גיבוי"""
     global CACHE_NAME
     
     if not CACHE_NAME and os.path.exists(CACHE_INFO_FILE):
@@ -202,27 +202,35 @@ def get_or_create_context_cache(client):
         f"=== קובץ הנהלים הרשמי והמלא (CONTEXT) ===\n{TERMINAL_CONTENT}\n=========================================\n"
     )
 
-    cache = client.caches.create(
-        model='gemini-2.5-flash',
-        config=types.CreateCachedContentConfig(
-            contents=[
-                types.Content(
-                    role="user", 
-                    parts=[types.Part.from_text(text=full_cache_text)]
-                )
-            ],
-            ttl="1800s"
-        )
-    )
-    CACHE_NAME = cache.name
+    candidate_models = ['models/gemini-2.5-flash', 'gemini-2.5-flash-001', 'gemini-2.5-flash']
     
-    try:
-        with open(CACHE_INFO_FILE, "w", encoding="utf-8") as f:
-            json.dump({"cache_name": CACHE_NAME, "created_at": time.time()}, f)
-    except Exception:
-        pass
-        
-    return cache
+    for model_name in candidate_models:
+        try:
+            cache = client.caches.create(
+                model=model_name,
+                config=types.CreateCachedContentConfig(
+                    contents=[
+                        types.Content(
+                            role="user", 
+                            parts=[types.Part.from_text(text=full_cache_text)]
+                        )
+                    ],
+                    ttl="1800s"
+                )
+            )
+            CACHE_NAME = cache.name
+            try:
+                with open(CACHE_INFO_FILE, "w", encoding="utf-8") as f:
+                    json.dump({"cache_name": CACHE_NAME, "created_at": time.time()}, f)
+            except Exception:
+                pass
+            return cache
+        except Exception as e:
+            print(f"⚠️ ניסיון יצירת Cache עם {model_name} נכשל: {e}")
+            continue
+
+    reset_cache_state()
+    return None
 
 def inject_hyperlinks(text):
     if not text:
@@ -284,14 +292,28 @@ def chat():
             client = genai.Client(api_key=gemini_api_key)
             cache_content = get_or_create_context_cache(client)
 
-            response = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=history_contents,
-                config=types.GenerateContentConfig(
-                    cached_content=cache_content.name,
-                    temperature=0.0
+            if cache_content and hasattr(cache_content, 'name'):
+                response = client.models.generate_content(
+                    model=cache_content.model,
+                    contents=history_contents,
+                    config=types.GenerateContentConfig(
+                        cached_content=cache_content.name,
+                        temperature=0.0
+                    )
                 )
-            )
+            else:
+                direct_contents = [
+                    types.Content(
+                        role="user", 
+                        parts=[types.Part.from_text(text=f"{SYSTEM_INSTRUCTION}\n\nקובץ הנהלים:\n{TERMINAL_CONTENT}")]
+                    )
+                ] + history_contents
+
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=direct_contents,
+                    config=types.GenerateContentConfig(temperature=0.0)
+                )
             
             if not response or not response.text:
                 raise ValueError("התשובה שהתקבלה מגוגל ריקה.")
