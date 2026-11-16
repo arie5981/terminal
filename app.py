@@ -80,7 +80,7 @@ def get_voice_mode():
     content = read_all_lines_from_github_file("data/voice.txt")
     if content and content.strip() in ["1", "0"]:
         return int(content.strip())
-    return 1  # ברירת מחדל: פעיל (1) אם הקובץ טרם נוצר
+    return 1
 
 def write_voice_mode_to_github(mode_value):
     """מעדכן את מצב הקול בתוך קובץ voice.txt ב-GitHub"""
@@ -98,7 +98,6 @@ def clean_html_for_history(text):
 def append_line_to_github_file(repo_filepath, new_line_content):
     """פונקציית עזר שמוסיפה שורה חדשה לקובץ ישירות בתוך ה-Repository ב-GitHub"""
     if not GITHUB_TOKEN or not GITHUB_REPO:
-        print("🚨 חסרים פרטי הזדהות של GITHUB_TOKEN או GITHUB_REPO בשרת.")
         return False
         
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{repo_filepath}"
@@ -117,9 +116,8 @@ def append_line_to_github_file(repo_filepath, new_line_content):
             sha = file_data.get("sha")
             current_content = base64.b64decode(file_data.get("content")).decode("utf-8")
         elif res.status_code == 404:
-            print(f"⚠️ הקובץ {repo_filepath} לא נמצא ב-GitHub. ננסה ליצור אותו.")
+            pass
         else:
-            print(f"⚠️ שגיאה במשיכת קובץ מ-GitHub (סטטוס {res.status_code}): {res.text}")
             return False
 
         if current_content and not current_content.endswith("\n"):
@@ -136,8 +134,7 @@ def append_line_to_github_file(repo_filepath, new_line_content):
         put_res = requests.put(url, headers=headers, json=payload)
         return put_res.status_code in [200, 201]
             
-    except Exception as e:
-        print(f"🚨 שגיאה חריגה בתקשורת מול GitHub API: {e}")
+    except Exception:
         return False
 
 def write_full_file_to_github(repo_filepath, full_content, commit_message):
@@ -164,8 +161,7 @@ def write_full_file_to_github(repo_filepath, full_content, commit_message):
 
         put_res = requests.put(url, headers=headers, json=payload)
         return put_res.status_code in [200, 201]
-    except Exception as e:
-        print(f"🚨 שגיאה בעדכון קובץ {repo_filepath} ב-GitHub: {e}")
+    except Exception:
         return False
 
 def read_all_lines_from_github_file(repo_filepath):
@@ -182,8 +178,8 @@ def read_all_lines_from_github_file(repo_filepath):
         if res.status_code == 200:
             file_data = res.json()
             return base64.b64decode(file_data.get("content")).decode("utf-8")
-    except Exception as e:
-        print(f"Error reading from GitHub: {e}")
+    except Exception:
+        pass
     return ""
 
 def load_terminal_data_directly():
@@ -207,7 +203,7 @@ def load_terminal_data_directly():
 load_terminal_data_directly()
 
 def get_or_create_context_cache(client):
-    """מנהל את יצירת או שליפת ה-Context Cache לטווח של 20 דקות"""
+    """מנהל את יצירת או שליפת ה-Context Cache עם מנגנון הגנה מפני שגיאות 404"""
     global CACHE_NAME
     
     if not CACHE_NAME and os.path.exists(CACHE_INFO_FILE):
@@ -226,6 +222,7 @@ def get_or_create_context_cache(client):
             else:
                 return existing_cache
         except Exception:
+            # אם ה-Cache נמחק, פג תוקף או החזיר 404 - נאפס וניצור חדש
             CACHE_NAME = None
 
     full_cache_text = (
@@ -233,22 +230,23 @@ def get_or_create_context_cache(client):
         f"=== קובץ הנהלים הרשמי והמלא (CONTEXT) ===\n{TERMINAL_CONTENT}\n=========================================\n"
     )
     
-    cache = client.caches.create(
-        model='gemini-2.5-flash',
-        config=types.CreateCachedContentConfig(
-            contents=[types.Content(role="user", parts=[types.Part.from_text(text=full_cache_text)])],
-            ttl="1200s"
-        )
-    )
-    CACHE_NAME = cache.name
-    
     try:
+        cache = client.caches.create(
+            model='gemini-2.5-flash',
+            config=types.CreateCachedContentConfig(
+                contents=[types.Content(role="user", parts=[types.Part.from_text(text=full_cache_text)])],
+                ttl="1200s"
+            )
+        )
+        CACHE_NAME = cache.name
+        
         with open(CACHE_INFO_FILE, "w", encoding="utf-8") as f:
             json.dump({"cache_name": CACHE_NAME, "created_at": time.time()}, f)
-    except Exception:
-        pass
-        
-    return cache
+            
+        return cache
+    except Exception as e:
+        print(f"⚠️ אזהרה: יצירת Cache נכשלה ({e}), ממשיך בלעדיו.")
+        return None
 
 def inject_hyperlinks(text):
     """מזריק את הנתונים מתוך info.txt לתשובה הסופית שחוזרת מג'מיני"""
@@ -288,7 +286,6 @@ def chat():
     if not TERMINAL_CONTENT:
         return jsonify({"response": "מערכת הנתונים של הטרמינל אינה טעונה בשרת."})
 
-    # קריאת הסטטוס העדכני מ-GitHub
     current_debug_mode = get_debug_mode()
 
     trimmed_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
@@ -326,13 +323,15 @@ def chat():
             client = genai.Client(api_key=gemini_api_key)
             cache_content = get_or_create_context_cache(client)
 
+            # הגדרת הקונפיגורציה בהתאם לזמינות ה-Cache
+            gen_config_params = {"temperature": 0.0}
+            if cache_content and hasattr(cache_content, 'name'):
+                gen_config_params["cached_content"] = cache_content.name
+
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
                 contents=formatted_contents,
-                config=types.GenerateContentConfig(
-                    cached_content=cache_content.name,
-                    temperature=0.0
-                )
+                config=types.GenerateContentConfig(**gen_config_params)
             )
             
             if not response or not response.text:
@@ -382,8 +381,7 @@ def chat():
                     time.sleep(retry_delay * (attempt + 1))
                     continue
             
-            # חשיפת הודעת השגיאה האמיתית מגוגל לצורך אבחון
-            friendly_message = f"שגיאת מערכת מגוגל: {error_str}"
+            friendly_message = "העוזר הדיגיטלי חווה כרגע עומס רגעי זמני בשרתי גוגל. אנא נסה שנית."
             return jsonify({
                 "response": friendly_message,
                 "debug": current_debug_mode,
@@ -485,7 +483,6 @@ def show_remarks():
     current_debug_mode = get_debug_mode()
     current_voice_mode = get_voice_mode()
 
-    # 1. קריאת הערות (remarks.txt)
     remarks_list = []
     github_remarks = read_all_lines_from_github_file("data/remarks.txt")
     if github_remarks:
@@ -499,7 +496,6 @@ def show_remarks():
                 continue
     remarks_list.reverse()
 
-    # 2. קריאת שאלות (questions.txt)
     questions_list = []
     github_questions = read_all_lines_from_github_file("data/questions.txt")
     if github_questions:
@@ -516,7 +512,6 @@ def show_remarks():
         current_voice_mode=current_voice_mode
     )
 
-# --- תבנית ה-HTML לעמוד ה-Remarks המורחב עם 3 לשוניות ---
 REMARKS_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -528,36 +523,27 @@ REMARKS_HTML_TEMPLATE = """
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; color: #333; }
         .container { max-width: 1300px; margin: 0 auto; }
         h1 { color: #1e3a8a; border-bottom: 3px solid #1e3a8a; padding-bottom: 10px; margin-bottom: 20px; font-size: 24px; }
-        
-        /* עיצוב לשוניות */
         .tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #ccd0d5; padding-bottom: 10px; }
         .tab-button { background-color: #e4e6eb; border: none; padding: 10px 20px; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; color: #4b5563; transition: all 0.2s; }
         .tab-button.active { background-color: #1e3a8a; color: white; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
-
         .summary-badge { background-color: #1e3a8a; color: white; padding: 4px 12px; border-radius: 12px; font-size: 14px; display: inline-block; margin-bottom: 15px; }
         .table-container { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden; }
         table { width: 100%; border-collapse: collapse; text-align: right; table-layout: fixed; }
         th { background-color: #1e3a8a; color: white; padding: 12px 15px; font-weight: bold; font-size: 15px; }
         td { padding: 12px 15px; border-bottom: 1px solid #e4e6eb; font-size: 14px; vertical-align: top; line-height: 1.5; word-wrap: break-word; }
         tr:hover { background-color: #f8fafc; }
-        
         .timestamp { color: #666; font-size: 12px; white-space: nowrap; }
         .author { font-weight: bold; color: #007bff; }
         .remark-text { background-color: #fff9db; padding: 6px 10px; border-right: 3px solid #fcc419; border-radius: 4px; font-weight: 500; }
         .box-content { max-height: 200px; overflow-y: auto; background-color: #f8f9fa; padding: 8px; border-radius: 4px; font-size: 13px; white-space: pre-line; }
         .no-remarks { text-align: center; padding: 40px; color: #666; font-size: 16px; }
-        
         .btn-delete { background-color: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 13px; cursor: pointer; transition: background-color 0.2s; }
         .btn-delete:hover { background-color: #dc2626; }
-
-        /* יומן שאלות */
         .questions-list { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 15px; }
         .question-item { padding: 12px; border-bottom: 1px solid #e4e6eb; font-family: monospace; font-size: 14px; direction: ltr; text-align: left; }
         .question-item:last-child { border-bottom: none; }
-
-        /* לשונית הגדרות דיבאג וקול */
         .settings-grid { display: flex; gap: 20px; flex-wrap: wrap; }
         .debug-card { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 25px; flex: 1; min-width: 320px; max-width: 500px; }
         .status-indicator { font-size: 18px; font-weight: bold; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
@@ -577,7 +563,6 @@ REMARKS_HTML_TEMPLATE = """
         <button class="tab-button" onclick="switchTab(event, 'settings-tab')">⚙️ ניהול הגדרות מערכת (בזמן ריצה)</button>
     </div>
 
-    <!-- לשונית הערות -->
     <div id="remarks-tab" class="tab-content active">
         <div class="summary-badge">סה"כ הערות שנאספו: {{ remarks|length }}</div>
         <div class="table-container">
@@ -621,7 +606,6 @@ REMARKS_HTML_TEMPLATE = """
         </div>
     </div>
 
-    <!-- לשונית שאלות -->
     <div id="questions-tab" class="tab-content">
         <div class="summary-badge">סה"כ שאלות ביומן: {{ questions|length }}</div>
         <div class="questions-list">
@@ -635,10 +619,8 @@ REMARKS_HTML_TEMPLATE = """
         </div>
     </div>
 
-    <!-- לשונית הגדרות שליטה בזמן ריצה -->
     <div id="settings-tab" class="tab-content">
         <div class="settings-grid">
-            <!-- כרטיס דיבאג -->
             <div class="debug-card">
                 <h3>שליטה על סטטוס DEBUG_MODE</h3>
                 <p>שינוי המצב כאן יעדכן מיד את קובץ <code>data/debug.txt</code> ב-GitHub וישנה את התנהגות הבוט בזמן אמת ללא צורך ב-Deploy.</p>
@@ -658,122 +640,3 @@ REMARKS_HTML_TEMPLATE = """
                         החלף למצב רגיל (DEBUG_MODE = 0)
                     {% else %}
                         החלף למצב דיבאג (DEBUG_MODE = 1)
-                    {% endif %}
-                </button>
-            </div>
-
-            <!-- כרטיס מיקרופון וקול -->
-            <div class="debug-card">
-                <h3>🎤 שליטה על הצגת מיקרופון והקראת קול</h3>
-                <p>שינוי המצב כאן יעדכן מיד את קובץ <code>data/voice.txt</code> ב-GitHub ויקבע האם כפתור המיקרופון והקראת התשובות יוצגו למשתמשים באתר.</p>
-                <hr style="border: 0; border-top: 1px solid #e4e6eb; margin: 20px 0;">
-                
-                <div class="status-indicator">
-                    סטטוס נוכחי: 
-                    {% if current_voice_mode == 1 %}
-                        <span class="status-active">🟢 פעיל (1) - מיקרופון והקראה מוצגים</span>
-                    {% else %}
-                        <span class="status-inactive">🔴 כבוי (0) - מיקרופון והקראה מוסתרים</span>
-                    {% endif %}
-                </div>
-
-                <button class="btn-toggle" onclick="toggleVoiceMode({{ current_voice_mode }})">
-                    {% if current_voice_mode == 1 %}
-                        הסתר מיקרופון וקול (VOICE = 0)
-                    {% else %}
-                        הצג מיקרופון וקול (VOICE = 1)
-                    {% endif %}
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script>
-    function switchTab(event, tabId) {
-        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-        document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
-        document.getElementById(tabId).classList.add('active');
-        event.currentTarget.classList.add('active');
-    }
-
-    function deleteRemark(originalIndex) {
-        if(!confirm('האם אתה בטוח שברצונך למחוק הערה זו? היא תועבר לקובץ deleted_remarks.txt.')) return;
-
-        fetch('/delete_remark', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ index: originalIndex })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                alert(data.message);
-                location.reload();
-            } else {
-                alert('שגיאה: ' + data.message);
-            }
-        })
-        .catch(err => {
-            console.error(err);
-            alert('תרחשה שגיאה בתקשורת עם השרת.');
-        });
-    }
-
-    function toggleDebugMode(currentMode) {
-        const newMode = currentMode === 1 ? 0 : 1;
-        
-        if(!confirm(`האם אתה בטוח שברצונך לשנות את ה-DEBUG_MODE ל-${newMode}?`)) return;
-
-        fetch('/update_debug_toggle', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ debug_mode: newMode })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                alert(data.message);
-                location.reload();
-            } else {
-                alert('שגיאה: ' + data.message);
-            }
-        })
-        .catch(err => {
-            console.error(err);
-            alert('תרחשה שגיאה בתקשורת עם השרת.');
-        });
-    }
-
-    function toggleVoiceMode(currentMode) {
-        const newMode = currentMode === 1 ? 0 : 1;
-        
-        if(!confirm(`האם אתה בטוח שברצונך לשנות את הצגת המיקרופון והקול ל-${newMode}?`)) return;
-
-        fetch('/update_voice_toggle', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ voice_mode: newMode })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                alert(data.message);
-                location.reload();
-            } else {
-                alert('שגיאה: ' + data.message);
-            }
-        })
-        .catch(err => {
-            console.error(err);
-            alert('תרחשה שגיאה בתקשורת עם השרת.');
-        });
-    }
-</script>
-</body>
-</html>
-"""
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port, debug=True)
