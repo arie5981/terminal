@@ -226,7 +226,7 @@ def get_or_create_context_cache(client):
                         parts=[types.Part.from_text(text=full_cache_text)]
                     )
                 ],
-                ttl="3600s"
+                ttl="600s"
             )
         )
         CACHE_NAME = cache.name
