@@ -21,7 +21,8 @@ GITHUB_REPO = "arie5981/terminal"
 # משתנים גלובליים לנתונים
 LINKS_DICTIONARY = {}   
 TERMINAL_CONTENT = ""   
-CACHE_NAME = None  # ישמור את המזהה הייחודי של ה-Cache בשרתי גוגל
+CACHE_NAME = None
+LAST_CACHE_ERROR = ""
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 CACHE_INFO_FILE = os.path.join(DATA_DIR, "cache_info.json")
@@ -176,8 +177,8 @@ def reset_cache_state():
             pass
 
 def get_or_create_context_cache(client):
-    """מנהל את יצירת או שליפת ה-Context Cache עם בדיקת תאימות לשם המודל ומנגנון גיבוי"""
-    global CACHE_NAME
+    """מנהל את יצירת או שליפת ה-Context Cache עם תיעוד שגיאות מדויק ומנגנון גיבוי"""
+    global CACHE_NAME, LAST_CACHE_ERROR
     
     if not CACHE_NAME and os.path.exists(CACHE_INFO_FILE):
         try:
@@ -193,6 +194,7 @@ def get_or_create_context_cache(client):
             if hasattr(existing_cache, 'state') and str(existing_cache.state) not in ["STATE_ACTIVE", "ACTIVE"]:
                 reset_cache_state()
             else:
+                LAST_CACHE_ERROR = ""
                 return existing_cache
         except Exception:
             reset_cache_state()
@@ -203,6 +205,7 @@ def get_or_create_context_cache(client):
     )
 
     candidate_models = ['models/gemini-2.5-flash', 'gemini-2.5-flash-001', 'gemini-2.5-flash']
+    errors = []
     
     for model_name in candidate_models:
         try:
@@ -219,6 +222,7 @@ def get_or_create_context_cache(client):
                 )
             )
             CACHE_NAME = cache.name
+            LAST_CACHE_ERROR = ""
             try:
                 with open(CACHE_INFO_FILE, "w", encoding="utf-8") as f:
                     json.dump({"cache_name": CACHE_NAME, "created_at": time.time()}, f)
@@ -226,9 +230,10 @@ def get_or_create_context_cache(client):
                 pass
             return cache
         except Exception as e:
-            print(f"⚠️ ניסיון יצירת Cache עם {model_name} נכשל: {e}")
+            errors.append(f"{model_name}: {str(e)}")
             continue
 
+    LAST_CACHE_ERROR = " | ".join(errors)
     reset_cache_state()
     return None
 
@@ -334,9 +339,10 @@ def chat():
 
             if current_debug_mode == 1:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cache_note = f" | שגיאת Cache: {LAST_CACHE_ERROR}" if LAST_CACHE_ERROR else ""
                 log_entry = (
                     f"[{timestamp}] השאלה: {user_question} | "
-                    f"קלט: {p_tokens}, מתוך ה-Cache: {c_tokens or 0}, פלט: {o_tokens}\n"
+                    f"קלט: {p_tokens}, מתוך ה-Cache: {c_tokens or 0}, פלט: {o_tokens}{cache_note}\n"
                 )
                 threading.Thread(target=append_line_to_github_file, args=("data/questions.txt", log_entry)).start()
             
