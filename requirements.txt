@@ -1,0 +1,5 @@
+Flask
+gunicorn
+requests
+markdown
+google-genai>=1.0.0
