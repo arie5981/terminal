@@ -247,10 +247,8 @@
 
     <div class="input-wrapper">
         <div class="input-container">
-            <textarea class="chat-textarea" id="userInput" placeholder="{{ 'הקלד או דבר אל המיקרופון...' if voice_mode == 1 else 'הקלד את שאלתך כאן...' }}" oninput="autoGrow(this)"></textarea>
-            {% if voice_mode == 1 %}
+            <textarea class="chat-textarea" id="userInput" placeholder="הקלד או דבר אל המיקרופון..." oninput="autoGrow(this)"></textarea>
             <button class="action-button mic-button" id="micBtn" onclick="toggleVoiceRecognition()" title="דבר למיקרופון">🎤</button>
-            {% endif %}
             <button class="action-button" id="sendBtn" onclick="handleSendOrStop()" title="שלח הודעה">✈</button>
         </div>
     </div>
@@ -273,7 +271,6 @@
     </div>
 
     <script>
-        const VOICE_ENABLED = {{ voice_mode | default(1) }};
         let memoryHistory = [];
         let currentActiveQuestion = "";
         let currentActiveResponse = "";
@@ -281,8 +278,8 @@
         let isRecording = false;
         let isSpeaking = false;
 
-        // אתחול מנגנון זיהוי דיבור (Web Speech API) רק אם VOICE_ENABLED == 1
-        if (VOICE_ENABLED === 1 && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+        // אתחול מנגנון זיהוי דיבור (Web Speech API)
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
             recognition.lang = 'he-IL';
@@ -314,7 +311,7 @@
         }
 
         function toggleVoiceRecognition() {
-            if (VOICE_ENABLED !== 1 || !recognition) return;
+            if (!recognition) return;
             
             if (isSpeaking) {
                 stopSpeech();
@@ -343,7 +340,7 @@
             }
         }
 
-        if (VOICE_ENABLED === 1 && 'speechSynthesis' in window) {
+        if ('speechSynthesis' in window) {
             window.speechSynthesis.onvoiceschanged = () => {
                 window.speechSynthesis.getVoices();
             };
@@ -381,7 +378,7 @@
         }
 
         function speakText(text) {
-            if (VOICE_ENABLED !== 1 || !('speechSynthesis' in window)) return;
+            if (!('speechSynthesis' in window)) return;
             
             stopSpeech();
             
@@ -394,8 +391,11 @@
 
             // 2. החלפת סימנים וניקוי להקראה שוטפת
             let cleanText = decodedText
+                // המרת הסימן '>' וסימני חץ לפסיק עם רווח לצורך הפסקה קצרה
                 .replace(/&gt;|>/g, ', ')
+                // ניקוי סימני Markdown מיוחדים (*, #, _)
                 .replace(/[\*\#\_]/g, '')
+                // צמצום פסיקים ורווחים כפולים
                 .replace(/,\s*,+/g, ',')
                 .replace(/\s+/g, ' ')
                 .trim();
@@ -436,7 +436,7 @@
         }
 
         function sendMessage(isVoiceInput = false) {
-            if (VOICE_ENABLED === 1 && 'speechSynthesis' in window) {
+            if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
                 if (isVoiceInput) {
                     const silentUtterance = new SpeechSynthesisUtterance('');
@@ -482,7 +482,7 @@
             .then(data => {
                 botDiv.innerHTML = data.response;
                 
-                if (isVoiceInput && VOICE_ENABLED === 1) {
+                if (isVoiceInput) {
                     speakText(data.response);
                 }
 
