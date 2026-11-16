@@ -176,7 +176,7 @@ def reset_cache_state():
             pass
 
 def get_or_create_context_cache(client):
-    """מנהל את יצירת או שליפת ה-Context Cache בצורה בטוחה וחסונה מפני 404"""
+    """מנהל את יצירת או שליפת ה-Context Cache בצורה תואמת ל-google-genai SDK"""
     global CACHE_NAME
     
     if not CACHE_NAME and os.path.exists(CACHE_INFO_FILE):
@@ -197,33 +197,32 @@ def get_or_create_context_cache(client):
         except Exception:
             reset_cache_state()
 
-    try:
-        cache = client.caches.create(
-            model='gemini-2.5-flash',
-            config=types.CreateCachedContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                contents=[
-                    types.Content(
-                        role="user", 
-                        parts=[types.Part.from_text(text=f"=== קובץ הנהלים הרשמי והמלא (CONTEXT) ===\n{TERMINAL_CONTENT}\n=========================================\n")]
-                    )
-                ],
-                ttl="1800s"  # 30 דקות
-            )
+    full_cache_text = (
+        f"{SYSTEM_INSTRUCTION}\n\n"
+        f"=== קובץ הנהלים הרשמי והמלא (CONTEXT) ===\n{TERMINAL_CONTENT}\n=========================================\n"
+    )
+
+    cache = client.caches.create(
+        model='gemini-2.5-flash',
+        config=types.CreateCachedContentConfig(
+            contents=[
+                types.Content(
+                    role="user", 
+                    parts=[types.Part.from_text(text=full_cache_text)]
+                )
+            ],
+            ttl="1800s"
         )
-        CACHE_NAME = cache.name
+    )
+    CACHE_NAME = cache.name
+    
+    try:
+        with open(CACHE_INFO_FILE, "w", encoding="utf-8") as f:
+            json.dump({"cache_name": CACHE_NAME, "created_at": time.time()}, f)
+    except Exception:
+        pass
         
-        try:
-            with open(CACHE_INFO_FILE, "w", encoding="utf-8") as f:
-                json.dump({"cache_name": CACHE_NAME, "created_at": time.time()}, f)
-        except Exception:
-            pass
-            
-        return cache
-    except Exception as e:
-        print(f"⚠️ יצירת Cache נכשלה ({e}), עובר למצב שליחה ישירה.")
-        reset_cache_state()
-        return None
+    return cache
 
 def inject_hyperlinks(text):
     if not text:
@@ -285,30 +284,14 @@ def chat():
             client = genai.Client(api_key=gemini_api_key)
             cache_content = get_or_create_context_cache(client)
 
-            if cache_content and hasattr(cache_content, 'name'):
-                # שליחה תוך שימוש ב-Cache
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=history_contents,
-                    config=types.GenerateContentConfig(
-                        cached_content=cache_content.name,
-                        temperature=0.0
-                    )
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=history_contents,
+                config=types.GenerateContentConfig(
+                    cached_content=cache_content.name,
+                    temperature=0.0
                 )
-            else:
-                # Fallback: שליחה ישירה ללא Cache אם ה-Cache לא זמין
-                direct_contents = [
-                    types.Content(role="user", parts=[types.Part.from_text(text=f"קובץ הנהלים:\n{TERMINAL_CONTENT}")])
-                ] + history_contents
-                
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=direct_contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_INSTRUCTION,
-                        temperature=0.0
-                    )
-                )
+            )
             
             if not response or not response.text:
                 raise ValueError("התשובה שהתקבלה מגוגל ריקה.")
@@ -344,7 +327,6 @@ def chat():
 
         except Exception as e:
             error_str = str(e)
-            # אם ה-Cache פג תוקף בדיוק ברגע השליחה (404) - נאפס וננסה שוב מיד!
             if "404" in error_str or "NOT_FOUND" in error_str:
                 reset_cache_state()
                 if attempt < max_retries - 1:
@@ -355,9 +337,8 @@ def chat():
                     time.sleep(retry_delay * (attempt + 1))
                     continue
             
-            friendly_message = "העוזר הדיגיטלי חווה כרגע עומס רגעי זמני בשרתי גוגל. אנא נסה שנית."
             return jsonify({
-                "response": friendly_message,
+                "response": f"שגיאת מערכת מגוגל: {error_str}",
                 "debug": current_debug_mode,
                 "original_question": user_question
             })
