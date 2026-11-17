@@ -277,6 +277,9 @@ def inject_hyperlinks(text):
             else:
                 hyperlink = f'<a href="{url}" style="color: #007bff; text-decoration: underline; font-weight: bold;" target="_blank">{name}</a>'
             text = text.replace(placeholder, hyperlink)
+
+    # הסרת סוגריים מרובעים מיותרים סביב שמות תפריטים שאינם קישורים אמיתיים
+    text = re.sub(r'(?<!סרטון הדרכה: )\[([^\]]+)\]', r'\1', text)
     return text
 
 @app.route('/')
