@@ -127,7 +127,6 @@ def find_best_available_flash_model(client, exclude_models=None):
                 continue
             methods = getattr(m, 'supported_generation_methods', []) or []
             lower_name = name.lower()
-            # סינון למודלי Flash יציבים ועדכניים שתומכים ביצירת תוכן
             if (
                 'flash' in lower_name
                 and 'generateContent' in methods
@@ -138,7 +137,6 @@ def find_best_available_flash_model(client, exclude_models=None):
             ):
                 candidates.append(name)
 
-        # העדפת מודלי Flash רגילים על פני lite, ומיון יורד לפי מספר הגרסה (למשל 3.5 לפני 2.5)
         standard_flash = sorted([c for c in candidates if 'lite' not in c.lower()], reverse=True)
         lite_flash = sorted([c for c in candidates if 'lite' in c.lower()], reverse=True)
         ordered = standard_flash + lite_flash
@@ -441,7 +439,6 @@ def chat():
             if current_debug_mode == 1:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 err_note = f" | שגיאת Cache: {LAST_CACHE_ERROR}" if LAST_CACHE_ERROR else ""
-                # חיווי 2: תגית התראה ביומן השאלות (questions.txt)
                 fallback_note = (
                     f" | [FALLBACK: מודל={ACTIVE_MODEL_NAME} | API={ACTIVE_API_VERSION}]"
                     if is_fallback_active() else ""
@@ -578,6 +575,8 @@ def show_remarks():
     saved_alerts = [a.strip() for a in read_all_lines_from_github_file("data/system_alerts.txt").splitlines() if a.strip()]
     saved_alerts.reverse()
 
+    cache_is_active = (time.time() >= CACHE_DISABLED_UNTIL)
+
     return render_template_string(
         REMARKS_HTML_TEMPLATE,
         remarks=remarks_list,
@@ -587,6 +586,9 @@ def show_remarks():
         fallback_active=is_fallback_active(),
         active_model=ACTIVE_MODEL_NAME,
         active_api=ACTIVE_API_VERSION,
+        default_model=DEFAULT_MODEL_NAME,
+        default_api=DEFAULT_API_VERSION,
+        cache_is_active=cache_is_active,
         fallback_reason=FALLBACK_REASON,
         saved_alerts=saved_alerts
     )
@@ -633,8 +635,12 @@ REMARKS_HTML_TEMPLATE = """
         .status-indicator { font-size: 18px; font-weight: bold; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
         .status-active { color: #2f9e44; }
         .status-inactive { color: #e03131; }
+        .status-warning { color: #d97706; }
         .btn-toggle { background-color: #1e3a8a; color: white; border: none; padding: 12px 24px; font-size: 15px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: background-color 0.2s; }
         .btn-toggle:hover { background-color: #1d4ed8; }
+        .tech-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f1f3f5; font-size: 14px; }
+        .tech-row:last-child { border-bottom: none; }
+        .tech-badge { background-color: #eef2ff; color: #1e3a8a; padding: 3px 8px; border-radius: 4px; font-family: monospace; font-size: 13px; font-weight: bold; direction: ltr; }
     </style>
 </head>
 <body>
@@ -769,6 +775,34 @@ REMARKS_HTML_TEMPLATE = """
                         הצג מיקרופון וקול (VOICE = 1)
                     {% endif %}
                 </button>
+            </div>
+
+            <div class="debug-card">
+                <h3>🤖 סטטוס חיבור API ומודל פעיל</h3>
+                <p>תצוגה חיה של המודל ופרוטוקול התקשורת מול שרתי גוגל, כולל זיהוי אוטומטי של מעבר למצב גיבוי (Fallback).</p>
+                <hr style="border: 0; border-top: 1px solid #e4e6eb; margin: 20px 0;">
+
+                <div class="status-indicator">
+                    מצב מערכת:
+                    {% if not fallback_active %}
+                        <span class="status-active">🟢 תקין - פועל על הגדרות ברירת מחדל</span>
+                    {% else %}
+                        <span class="status-warning">🟠 מצב גיבוי (Fallback) פעיל</span>
+                    {% endif %}
+                </div>
+
+                <div class="tech-row">
+                    <span><strong>מודל AI פעיל:</strong></span>
+                    <span class="tech-badge">{{ active_model }}</span>
+                </div>
+                <div class="tech-row">
+                    <span><strong>פרוטוקול API פעיל:</strong></span>
+                    <span class="tech-badge">{{ active_api }}</span>
+                </div>
+                <div class="tech-row">
+                    <span><strong>מנגנון Explicit Cache:</strong></span>
+                    <span class="tech-badge">{{ 'ACTIVE (TTL 600s)' if cache_is_active else 'FALLBACK (DIRECT)' }}</span>
+                </div>
             </div>
         </div>
     </div>
